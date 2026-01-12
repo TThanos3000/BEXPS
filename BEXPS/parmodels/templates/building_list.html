@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Здания{% endblock %}
+
+{% block content %}
+  <h2>Здания</h2>
+
+  {% if buildings %}
+    {% for b in buildings %}
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+          <div>
+            <div style="font-size:18px; font-weight:600;">
+              <a href="{% url 'parmodels:building_detail' b.id %}">{{ b.name }}</a>
+            </div>
+            <div class="muted">{{ b.address }}</div>
+          </div>
+          <span class="badge">id: {{ b.id }}</span>
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="card muted">Пока нет зданий. Добавь в админке: /admin</div>
+  {% endif %}
+{% endblock %}

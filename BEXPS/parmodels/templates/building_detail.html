@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ building.name }}{% endblock %}
+
+{% block content %}
+  <div style="margin-bottom:12px;">
+    <a href="{% url 'parmodels:building_list' %}">← назад к зданиям</a>
+  </div>
+
+  <h2>{{ building.name }}</h2>
+  <div class="muted" style="margin-bottom:14px;">{{ building.address }}</div>
+
+  <div class="grid">
+    <div>
+      <h3>Локации</h3>
+      {% if locations %}
+        {% for loc in locations %}
+          <div class="card">
+            <div style="font-weight:600;">{{ loc.name }}</div>
+            <div class="muted">
+              тип: {{ loc.location_type }}
+              {% if loc.parent %} · родитель: {{ loc.parent.name }}{% endif %}
+            </div>
+            <div class="muted">id: {{ loc.id }}</div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="card muted">Локаций пока нет</div>
+      {% endif %}
+    </div>
+
+    <div>
+      <h3>IFC-модели</h3>
+      {% if models %}
+        {% for m in models %}
+          <div class="card">
+            <div style="font-weight:600;">{{ m.model_name }}</div>
+            <div class="muted">
+              статус: {{ m.status }} · локация: {{ m.location.name }}
+            </div>
+            <div class="muted">
+              sha256: {{ m.ifc_sha256|slice:":12" }}…
+            </div>
+            <div class="muted">{{ m.uploaded_at }}</div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="card muted">Моделей пока нет</div>
+      {% endif %}
+    </div>
+  </div>
+{% endblock %}
