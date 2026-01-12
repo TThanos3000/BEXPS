@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <h3 class="mb-1">Оборудование</h3>
+    <div class="text-muted">
+      {{ building.name }} / {{ location.name }}
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary"
+       href="{% url 'parmodels:location_detail' building.id location.id %}">
+      Назад к локации
+    </a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+
+    <form class="row g-2" method="get">
+      <div class="col-12 col-lg-4">
+        <label class="form-label">IFC модель</label>
+        <select class="form-select" name="ifc" onchange="this.form.submit()">
+          <option value="">Последняя (по умолчанию)</option>
+          {% for m in ifc_models %}
+            <option value="{{ m.id }}"
+              {% if selected_ifc_model and m.id == selected_ifc_model.id %}selected{% endif %}>
+              {{ m.model_name|default:"IFC модель" }} (id={{ m.id }})
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-12 col-lg-4">
+        <label class="form-label">Поиск</label>
+        <input class="form-control" name="q" value="{{ q }}"
+               placeholder="Имя, GlobalId, IfcId, тип..." />
+      </div>
+
+      <div class="col-12 col-lg-3">
+        <label class="form-label">Тип</label>
+        <select class="form-select" name="type">
+          <option value="">Все</option>
+          {% for t in type_choices %}
+            <option value="{{ t.code }}" {% if t.code == type_code %}selected{% endif %}>
+              {{ t.code }}{% if t.ru_name %} — {{ t.ru_name }}{% endif %}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-12 col-lg-1 d-grid">
+        <label class="form-label d-none d-lg-block">&nbsp;</label>
+        <button class="btn btn-primary" type="submit">Ок</button>
+      </div>
+    </form>
+
+  </div>
+</div>
+
+{% if not selected_ifc_model %}
+  <div class="alert alert-warning">
+    В этой локации пока нет загруженных IFC моделей.
+    Сначала загрузи IFC и выполни парсинг.
+  </div>
+{% else %}
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="text-muted">
+      Модель: <strong>{{ selected_ifc_model.model_name|default:"IFC модель" }}</strong>
+    </div>
+    <div class="text-muted">
+      Элементов: <strong>{{ elements|length }}</strong>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-striped align-middle">
+      <thead>
+        <tr>
+          <th style="width: 110px;">IfcId</th>
+          <th style="width: 160px;">Тип</th>
+          <th>Имя</th>
+          <th style="width: 240px;">GlobalId</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in elements %}
+          <tr>
+            <td class="text-muted">{{ e.ifc_id }}</td>
+            <td>
+              <span class="badge text-bg-secondary">
+                {{ e.element_type.code }}
+              </span>
+              {% if e.element_type.ru_name %}
+                <div class="small text-muted">{{ e.element_type.ru_name }}</div>
+              {% endif %}
+            </td>
+            <td>{{ e.name|default:"—" }}</td>
+            <td class="text-muted">{{ e.global_id|default:"—" }}</td>
+          </tr>
+        {% empty %}
+          <tr>
+            <td colspan="4" class="text-muted">
+              Пусто. Возможно, ты еще не нажал “парсинг” после загрузки IFC.
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+{% endblock %}

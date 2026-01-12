@@ -22,4 +22,14 @@ urlpatterns = [
         views.ifc_model_delete,
         name="ifc_model_delete",
     ),
+    path(
+        "buildings/<int:building_id>/locations/<int:location_id>/ifc/<int:ifc_id>/ingest/",
+        views.ifc_ingest_json,
+        name="ifc_ingest_json",
+    ),
+    path(
+        "buildings/<int:building_id>/locations/<int:location_id>/equipment/",
+        views.location_equipment,
+        name="location_equipment",
+    ),
 ]

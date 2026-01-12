@@ -15,6 +15,10 @@
      href="{% url 'parmodels:ifc_model_upload' building.id location.id %}">
     Загрузить IFC модель
   </a>
+  <a class="btn btn-outline-primary"
+     href="{% url 'parmodels:location_equipment' building.id location.id %}">
+     Оборудование
+  </a>
 </div>
 
 <div class="card">
@@ -55,6 +59,17 @@
                     <button type="submit" class="btn btn-sm btn-outline-danger">Удалить</button>
                   </form>
                 </td>
+                <td>
+                  <button
+                    class="btn btn-primary btn-sm"
+                    type="button"
+                    onclick="parseAndSendIfc({{ building.id }}, {{ location.id }}, {{ m.id }}, '{{ m.ifc_file.url }}')"
+                  >
+                    Извлечь данные из IFC
+                  </button>
+
+                  <span id="parse-status-{{ m.id }}" class="ms-2 text-muted"></span>
+                </td>
               </tr>
             {% endfor %}
           </tbody>
@@ -65,4 +80,114 @@
     {% endif %}
   </div>
 </div>
+
+<script type="module">
+  import {
+    IfcAPI,
+    IFCWALL,
+    IFCSLAB,
+    IFCDOOR,
+    IFCWINDOW,
+    IFCRELDEFINESBYPROPERTIES
+  } from "https://unpkg.com/web-ifc@0.0.51/web-ifc-api.js";
+
+  const IFC_TYPE_LABELS_RU = {
+    IFCWALL: "Стена",
+    IFCSLAB: "Перекрытие",
+    IFCDOOR: "Дверь",
+    IFCWINDOW: "Окно",
+  };
+
+  const ifcAPI = new IfcAPI();
+  ifcAPI.SetWasmPath("https://unpkg.com/web-ifc@0.0.51/");
+  await ifcAPI.Init();
+
+  function getCookie(name) {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length === 2) return parts.pop().split(";").shift();
+    return null;
+  }
+
+  function parseElementsByType(modelID, ifcType, ifcTypeName) {
+    const elements = [];
+    const ids = ifcAPI.GetLineIDsWithType(modelID, ifcType);
+
+    for (let i = 0; i < ids.size(); i++) {
+      const id = ids.get(i);
+      const props = ifcAPI.GetLine(modelID, id);
+
+      elements.push({
+        ifcId: id,
+        globalId: props.GlobalId?.value || null,
+        name: props.Name?.value || null,
+        type: IFC_TYPE_LABELS_RU[ifcTypeName] || ifcTypeName,
+        ifcType: ifcTypeName,
+      });
+    }
+
+    return elements;
+  }
+
+  async function parseIfcFromUrl(fileUrl, fileName) {
+    const resp = await fetch(fileUrl);
+    if (!resp.ok) throw new Error("Не удалось скачать IFC файл");
+    const buffer = await resp.arrayBuffer();
+
+    const modelID = ifcAPI.OpenModel(new Uint8Array(buffer));
+
+    const json = {
+      meta: { fileName },
+      elements: {
+        walls: parseElementsByType(modelID, IFCWALL, "IFCWALL"),
+        slabs: parseElementsByType(modelID, IFCSLAB, "IFCSLAB"),
+        doors: parseElementsByType(modelID, IFCDOOR, "IFCDOOR"),
+        windows: parseElementsByType(modelID, IFCWINDOW, "IFCWINDOW"),
+      },
+    };
+
+    ifcAPI.CloseModel(modelID);
+    return json;
+  }
+
+  window.parseAndSendIfc = async function(buildingId, locationId, ifcId, fileUrl) {
+    const statusEl = document.getElementById(`parse-status-${ifcId}`);
+    const setStatus = (text) => { if (statusEl) statusEl.textContent = text; };
+
+    try {
+      setStatus("Парсю IFC...");
+
+      const fileName = (fileUrl.split("/").pop() || "model.ifc");
+      const json = await parseIfcFromUrl(fileUrl, fileName);
+
+      setStatus("Отправляю JSON на сервер...");
+
+      const csrf = getCookie("csrftoken");
+
+      const ingestUrl = `/buildings/${buildingId}/locations/${locationId}/ifc/${ifcId}/ingest/`;
+
+      const r = await fetch(ingestUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrf,
+        },
+        body: JSON.stringify(json),
+      });
+
+      if (!r.ok) {
+        const t = await r.text();
+        throw new Error(`Ошибка сервера: ${r.status} ${t}`);
+      }
+
+      const data = await r.json();
+      setStatus(`Готово. Создано элементов: ${data.created}`);
+
+    } catch (e) {
+      console.error(e);
+      setStatus(`Ошибка: ${e.message}`);
+    }
+  };
+</script>
+
 {% endblock %}

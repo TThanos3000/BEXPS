@@ -59,6 +59,7 @@ class IfcModel(models.Model):
     )  # или FileField, если будешь хранить файл через Django
     ifc_sha256 = models.CharField(max_length=64, unique=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    is_parsed = models.BooleanField(default=False)
     status = models.CharField(max_length=32, default="uploaded")  # uploaded/parsed/error
     uploaded_by = models.ForeignKey(
         User,
