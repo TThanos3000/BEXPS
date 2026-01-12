@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ location.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <a class="text-secondary text-decoration-none" href="{% url 'parmodels:building_detail' building.id %}">← назад к зданию</a>
+    <h1 class="h4 mt-2 mb-1">{{ location.name }}</h1>
+    <div class="text-secondary">
+      здание: {{ building.name }} · тип: {{ location.location_type }}
+    </div>
+  </div>
+
+  <a class="btn btn-primary"
+     href="{% url 'parmodels:ifc_model_upload' building.id location.id %}">
+    Загрузить IFC модель
+  </a>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Модели в этой локации</h2>
+
+    {% if models %}
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Название</th>
+              <th>Статус</th>
+              <th>Дата</th>
+              <th>Файл</th>
+              <th class="text-end">Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for m in models %}
+              <tr>
+                <td class="fw-semibold">{{ m.model_name }}</td>
+                <td><span class="badge text-bg-light">{{ m.status }}</span></td>
+                <td class="text-secondary small">{{ m.uploaded_at }}</td>
+                <td>
+                  {% if m.ifc_file %}
+                    <a href="{{ m.ifc_file.url }}">{{ m.ifc_file.name|cut:"ifc/" }}</a>
+                  {% else %}
+                    <span class="text-secondary small">нет файла</span>
+                  {% endif %}
+                </td>
+                <td class="text-end">
+                  <form method="post"
+                        action="{% url 'parmodels:ifc_model_delete' building.id location.id m.id %}"
+                        onsubmit="return confirm('Удалить модель и файл?');"
+                        class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-sm btn-outline-danger">Удалить</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-secondary">Пока нет загруженных моделей</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

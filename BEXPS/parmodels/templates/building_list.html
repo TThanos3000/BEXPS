@@ -2,23 +2,42 @@
 {% block title %}Здания{% endblock %}
 
 {% block content %}
-  <h2>Здания</h2>
+<div class="d-flex align-items-end justify-content-between mb-3">
+  <div>
+    <h1 class="h4 mb-1">Здания</h1>
+    <div class="text-secondary">Выбери здание, чтобы увидеть локации и модели</div>
+  </div>
+  <a class="btn btn-outline-secondary" href="/admin/parmodels/building/" target="_blank">Открыть админку</a>
+</div>
 
-  {% if buildings %}
+{% if buildings %}
+  <div class="row g-3">
     {% for b in buildings %}
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
-          <div>
-            <div style="font-size:18px; font-weight:600;">
-              <a href="{% url 'parmodels:building_detail' b.id %}">{{ b.name }}</a>
+      <div class="col-12 col-md-6 col-lg-4">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <div class="fw-semibold">
+                  <a class="text-decoration-none" href="{% url 'parmodels:building_detail' b.id %}">{{ b.name }}</a>
+                </div>
+                <div class="text-secondary small mt-1">{{ b.address }}</div>
+              </div>
+              <span class="badge text-bg-light">id {{ b.id }}</span>
             </div>
-            <div class="muted">{{ b.address }}</div>
           </div>
-          <span class="badge">id: {{ b.id }}</span>
+          <div class="card-footer bg-transparent border-0 pt-0">
+            <a class="btn btn-sm btn-primary" href="{% url 'parmodels:building_detail' b.id %}">Открыть</a>
+          </div>
         </div>
       </div>
     {% endfor %}
-  {% else %}
-    <div class="card muted">Пока нет зданий. Добавь в админке: /admin</div>
-  {% endif %}
+  </div>
+{% else %}
+  <div class="card">
+    <div class="card-body text-secondary">
+      Пока нет зданий. Добавь в админке: /admin
+    </div>
+  </div>
+{% endif %}
 {% endblock %}

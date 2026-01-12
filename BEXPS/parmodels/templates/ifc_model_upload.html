@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Загрузка IFC{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a class="text-secondary text-decoration-none" href="{% url 'parmodels:location_detail' building.id location.id %}">← назад к локации</a>
+</div>
+
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <h1 class="h5 mb-1">Загрузка IFC модели</h1>
+        <div class="text-secondary mb-3">
+          здание: {{ building.name }} · локация: {{ location.name }}
+        </div>
+
+        <form method="post" enctype="multipart/form-data" class="vstack gap-3">
+          {% csrf_token %}
+
+          <div>
+            <label class="form-label">Название модели</label>
+            {{ form.model_name }}
+          </div>
+
+          <div>
+            <label class="form-label">IFC файл</label>
+            {{ form.ifc_file }}
+            <div class="form-text">Поддерживается .ifc</div>
+          </div>
+
+          {% if form.errors %}
+            <div class="alert alert-danger mb-0">
+              {{ form.errors }}
+            </div>
+          {% endif %}
+
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">Загрузить</button>
+            <a class="btn btn-outline-secondary" href="{% url 'parmodels:location_detail' building.id location.id %}">Отмена</a>
+          </div>
+        </form>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

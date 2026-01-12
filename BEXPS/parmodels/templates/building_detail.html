@@ -2,50 +2,44 @@
 {% block title %}{{ building.name }}{% endblock %}
 
 {% block content %}
-  <div style="margin-bottom:12px;">
-    <a href="{% url 'parmodels:building_list' %}">← назад к зданиям</a>
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <a class="text-secondary text-decoration-none" href="{% url 'parmodels:building_list' %}">← назад</a>
+    <h1 class="h4 mt-2 mb-1">{{ building.name }}</h1>
+    <div class="text-secondary">{{ building.address }}</div>
   </div>
+  <a class="btn btn-outline-secondary" href="/admin/parmodels/location/" target="_blank">Локации в админке</a>
+</div>
 
-  <h2>{{ building.name }}</h2>
-  <div class="muted" style="margin-bottom:14px;">{{ building.address }}</div>
+<div class="row g-3">
+  <div class="col-12 col-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h2 class="h6 mb-0">Локации</h2>
+          <span class="text-secondary small">кликни по локации</span>
+        </div>
 
-  <div class="grid">
-    <div>
-      <h3>Локации</h3>
-      {% if locations %}
-        {% for loc in locations %}
-          <div class="card">
-            <div style="font-weight:600;">{{ loc.name }}</div>
-            <div class="muted">
-              тип: {{ loc.location_type }}
-              {% if loc.parent %} · родитель: {{ loc.parent.name }}{% endif %}
-            </div>
-            <div class="muted">id: {{ loc.id }}</div>
+        {% if locations %}
+          <div class="list-group list-group-flush">
+            {% for loc in locations %}
+              <a class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+                 href="{% url 'parmodels:location_detail' building.id loc.id %}">
+                <div>
+                  <div class="fw-semibold">{{ loc.name }}</div>
+                  <div class="text-secondary small">
+                    тип: {{ loc.location_type }}{% if loc.parent %} · родитель: {{ loc.parent.name }}{% endif %}
+                  </div>
+                </div>
+                <span class="badge text-bg-light">id {{ loc.id }}</span>
+              </a>
+            {% endfor %}
           </div>
-        {% endfor %}
-      {% else %}
-        <div class="card muted">Локаций пока нет</div>
-      {% endif %}
-    </div>
-
-    <div>
-      <h3>IFC-модели</h3>
-      {% if models %}
-        {% for m in models %}
-          <div class="card">
-            <div style="font-weight:600;">{{ m.model_name }}</div>
-            <div class="muted">
-              статус: {{ m.status }} · локация: {{ m.location.name }}
-            </div>
-            <div class="muted">
-              sha256: {{ m.ifc_sha256|slice:":12" }}…
-            </div>
-            <div class="muted">{{ m.uploaded_at }}</div>
-          </div>
-        {% endfor %}
-      {% else %}
-        <div class="card muted">Моделей пока нет</div>
-      {% endif %}
+        {% else %}
+          <div class="text-secondary">Локаций пока нет</div>
+        {% endif %}
+      </div>
     </div>
   </div>
+</div>
 {% endblock %}
