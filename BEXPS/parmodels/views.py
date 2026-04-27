@@ -4,7 +4,7 @@ import json
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from .models import Building, Location, IfcModel
-from .forms import IfcModelUploadForm
+from .forms import IfcModelUploadForm, LocationForm
 from django.db import transaction
 from django.http import JsonResponse, HttpResponseBadRequest
 
@@ -19,12 +19,23 @@ def building_list(request):
 def building_detail(request, building_id: int):
     building = get_object_or_404(Building, id=building_id)
 
-    locations = (
+    q = (request.GET.get("q") or "").strip()
+
+    locations_qs = Location.objects.filter(building=building).select_related("parent").order_by("name")
+
+    if q:
+        locations_qs = locations_qs.filter(name__icontains=q).order_by("id").select_related("parent")
+
+    # если ты строишь дерево (parents/children), то ниже будет твоя текущая логика дерева
+    # важно: использовать locations_qs (уже отфильтрованные), а не Location.objects.filter(...)
+    locations = list(locations_qs)
+
+    """locations = (
         Location.objects
         .filter(building=building)
         .select_related("parent")
         .order_by("id")
-    )
+    )"""
 
     models = (
         IfcModel.objects
@@ -40,6 +51,7 @@ def building_detail(request, building_id: int):
             "building": building,
             "locations": locations,
             "models": models,
+            "q": q,
         },
     )
 
@@ -59,6 +71,54 @@ def location_detail(request, building_id: int, location_id: int):
         "location_detail.html",
         {"building": building, "location": location, "models": models},
     )
+
+def location_create(request, building_id):
+    building = get_object_or_404(Building, id=building_id)
+
+    if request.method == "POST":
+        form = LocationForm(request.POST)
+        if form.is_valid():
+            loc = form.save(commit=False)
+            loc.building = building  # критично: привязываем к зданию
+            loc.save()
+            messages.success(request, "Локация создана")
+            return redirect("parmodels:building_detail", building_id=building.id)
+    else:
+        form = LocationForm()
+
+    # ограничим parent только локациями этого здания
+    if "parent" in form.fields:
+        form.fields["parent"].queryset = Location.objects.filter(building=building)
+
+    return render(request, "location_form.html", {
+        "building": building,
+        "form": form,
+        "mode": "create",
+    })
+
+
+def location_edit(request, building_id, location_id):
+    building = get_object_or_404(Building, id=building_id)
+    location = get_object_or_404(Location, id=location_id, building=building)
+
+    if request.method == "POST":
+        form = LocationForm(request.POST, instance=location)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Локация обновлена")
+            return redirect("parmodels:location_detail", building_id=building.id, location_id=location.id)
+    else:
+        form = LocationForm(instance=location)
+
+    if "parent" in form.fields:
+        form.fields["parent"].queryset = Location.objects.filter(building=building).exclude(id=location.id)
+
+    return render(request, "location_form.html", {
+        "building": building,
+        "location": location,
+        "form": form,
+        "mode": "edit",
+    })
 
 
 def ifc_model_upload(request, building_id: int, location_id: int):
@@ -128,8 +188,7 @@ def ifc_ingest_json(request, building_id: int, location_id: int, ifc_id: int):
     to_create = []
 
     with transaction.atomic():
-        # маппинг "ifcType" -> русское название/группа (можешь хранить как ElementType)
-        # если ElementType у тебя уже есть, оставь get_or_create
+
         for group_key, items in elements.items():
             if not isinstance(items, list):
                 continue
@@ -153,7 +212,6 @@ def ifc_ingest_json(request, building_id: int, location_id: int, ifc_id: int):
                         ifc_id=item.get("ifcId"),
                         global_id=item.get("globalId"),
                         name=item.get("name"),
-                        # сюда позже можно добавить property_sets=...
                     )
                 )
 

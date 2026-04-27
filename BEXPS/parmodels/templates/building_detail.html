@@ -6,9 +6,13 @@
   <div>
     <a class="text-secondary text-decoration-none" href="{% url 'parmodels:building_list' %}">← назад</a>
     <h1 class="h4 mt-2 mb-1">{{ building.name }}</h1>
-    <div class="text-secondary">{{ building.address }}</div>
+    <div class="text-secondary">адрес: {{ building.address }}</div>
+    <div class="text-secondary">{{ building.description }}</div>
   </div>
   <a class="btn btn-outline-secondary" href="/admin/parmodels/location/" target="_blank">Локации в админке</a>
+  <a class="btn btn-primary" href="{% url 'parmodels:location_create' building.id %}">
+    Добавить локацию
+  </a>
 </div>
 
 <div class="row g-3">
@@ -18,6 +22,34 @@
         <div class="d-flex justify-content-between align-items-center mb-2">
           <h2 class="h6 mb-0">Локации</h2>
         </div>
+        <form method="get" class="row g-2 align-items-center mb-3">
+          <div class="col-sm-8 col-md-6">
+            <input
+              type="text"
+              name="q"
+              value="{{ q }}"
+              class="form-control"
+              placeholder="Поиск локации по названию..."
+            >
+          </div>
+
+          <div class="col-auto">
+            <button class="btn btn-primary" type="submit">Найти</button>
+          </div>
+
+          {% if q %}
+            <div class="col-auto">
+              <a class="btn btn-outline-secondary" href="{% url 'parmodels:building_detail' building.id %}">
+                Сбросить
+              </a>
+            </div>
+          {% endif %}
+        </form>
+        {% if q and not locations %}
+          <div class="alert alert-warning">
+            Ничего не найдено по запросу "{{ q }}"
+          </div>
+        {% endif %}
 
         {% if locations %}
           <div class="list-group list-group-flush">

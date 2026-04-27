@@ -16,8 +16,12 @@
     Загрузить IFC модель
   </a>
   <a class="btn btn-outline-primary"
+    href="{% url 'parmodels:location_edit' building.id location.id %}">
+    Редактировать локацию
+  </a>
+  <a class="btn btn-outline-primary"
      href="{% url 'parmodels:location_equipment' building.id location.id %}">
-     Оборудование
+     Оборудование в локации
   </a>
 </div>
 

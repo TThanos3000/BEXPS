@@ -32,4 +32,14 @@ urlpatterns = [
         views.location_equipment,
         name="location_equipment",
     ),
+    path(
+        "buildings/<int:building_id>/locations/create/",
+        views.location_create,
+        name="location_create"
+    ),
+    path(
+        "buildings/<int:building_id>/locations/<int:location_id>/edit/",
+        views.location_edit,
+        name="location_edit"
+    ),
 ]
