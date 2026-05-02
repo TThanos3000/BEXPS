@@ -1,45 +1,59 @@
 import json
+import re
+from datetime import timedelta
 
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import Count, Q
-from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from .forms import (
+    ApplicationEditForm,
     ApplicationForm,
     ApplicationStatusForm,
+    EquipmentEditForm,
     EquipmentForm,
     EquipmentStatusForm,
-    FileUploadForm,
+    InvitationRegistrationForm,
     LocationForm,
     LocationModelForm,
+    OrganizationInvitationForm,
+    UserProfileForm,
 )
 from .models import (
     Application,
+    ApplicationPriority,
     ApplicationStatus,
+    Department,
     Equipment,
     EquipmentStatus,
     EquipmentType,
-    File,
     History_Application,
     History_Equipment,
     Location,
     LocationModel,
+    OrganizationInvitation,
     OrganizationMembership,
 )
+from .services import (
+    get_current_membership,
+    get_current_organization as service_get_current_organization,
+    user_is_org_admin,
+)
 
-
-def _get_building_location(building_id: int) -> Location:
-    return get_object_or_404(
-        Location,
-        id=building_id,
-        location_type=Location.LocationType.BUILDING,
-    )
+STATUS_FALLBACK_LABELS = {
+    "new": "Новая",
+    "in_progress": "В работе",
+    "waiting_review": "Ожидает проверки",
+    "completed": "Выполнена",
+    "cancelled": "Отменена",
+}
+DEFAULT_BADGE_COLOR = "#6c757d"
 
 
 def _flatten_locations(locations):
@@ -129,114 +143,195 @@ def _location_descendant_ids(location):
 
 
 def _get_current_organization(user):
-    if not user.is_authenticated:
-        return None
-    membership = (
-        OrganizationMembership.objects
-        .filter(user=user, status=OrganizationMembership.Status.ACTIVE)
-        .select_related("organization")
-        .order_by("id")
-        .first()
+    return service_get_current_organization(user)
+
+
+def _organization_access_denied(request):
+    return render(request, "organization_no_access.html", status=403)
+
+
+def _require_current_organization(request):
+    organization = _get_current_organization(request.user)
+    if organization is None:
+        messages.error(
+            request,
+            "Не найдена активная организация пользователя. Создание записи невозможно.",
+        )
+    return organization
+
+
+def _organization_users_queryset(organization):
+    return (
+        get_user_model().objects
+        .filter(
+            organization_memberships__organization=organization,
+            organization_memberships__status=OrganizationMembership.Status.ACTIVE,
+        )
+        .distinct()
+        .order_by("last_name", "first_name", "email", "username")
     )
-    if membership:
-        return membership.organization
-    return None
+
+
+def _status_display(status):
+    if not status:
+        return "Без статуса"
+    if status.name:
+        return status.name
+    return STATUS_FALLBACK_LABELS.get(status.code, status.code)
+
+
+def _safe_color(color_code):
+    if color_code and re.fullmatch(r"#[0-9a-fA-F]{6}", color_code):
+        return color_code
+    return DEFAULT_BADGE_COLOR
+
+
+def _application_status_groups(queryset=None):
+    base_queryset = queryset if queryset is not None else Application.objects.all()
+    statuses = ApplicationStatus.objects.order_by("name", "code")
+    groups = [
+        {
+            "status": status,
+            "label": _status_display(status),
+            "count": base_queryset.filter(status=status).count(),
+            "color": _safe_color(getattr(status, "color_code", "")),
+        }
+        for status in statuses
+    ]
+    unassigned_count = base_queryset.filter(status__isnull=True).count()
+    if unassigned_count:
+        groups.append({"status": None, "label": "Без статуса", "count": unassigned_count, "color": DEFAULT_BADGE_COLOR})
+    return groups
+
+
+def _mark_deadline_state(applications):
+    threshold = timezone.now() + timedelta(days=2)
+    for application in applications:
+        application.deadline_is_urgent = bool(
+            application.deadline and application.deadline <= threshold
+        )
+        application.status_color = _safe_color(getattr(application.status, "color_code", ""))
+        application.priority_color = _safe_color(getattr(application.priority, "color_code", ""))
+    return applications
 
 
 @login_required
-def building_list(request):
-    buildings = (
-        Location.objects
-        .filter(location_type=Location.LocationType.BUILDING)
-        .select_related("organization", "parent")
-        .order_by("name")
-    )
-    User = get_user_model()
+def dashboard(request):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     completed_status_codes = ("done", "completed", "closed", "finished")
+    applications = Application.objects.filter(organization=organization)
 
     context = {
-        "buildings": buildings,
-        "applications_count": Application.objects.count(),
-        "active_applications_count": Application.objects.exclude(
+        "current_organization": organization,
+        "applications_count": applications.count(),
+        "active_applications_count": applications.exclude(
             status__code__in=completed_status_codes
         ).count(),
-        "completed_applications_count": Application.objects.filter(
+        "completed_applications_count": applications.filter(
             status__code__in=completed_status_codes
         ).count(),
-        "locations_count": Location.objects.count(),
-        "equipment_count": Equipment.objects.count(),
-        "users_count": User.objects.count(),
+        "locations_count": Location.objects.filter(organization=organization).count(),
+        "equipment_count": Equipment.objects.filter(organization=organization).count(),
+        "users_count": OrganizationMembership.objects.filter(
+            organization=organization,
+            status=OrganizationMembership.Status.ACTIVE,
+        ).count(),
     }
-    return render(request, "building_list.html", context)
-
-
-@login_required
-def building_detail(request, building_id: int):
-    building = _get_building_location(building_id)
-
-    q = (request.GET.get("q") or "").strip()
-
-    locations_qs = (
-        Location.objects
-        .filter(parent=building)
-        .select_related("parent", "organization")
-        .order_by("name")
-    )
-
-    if q:
-        locations_qs = locations_qs.filter(name__icontains=q).order_by("id")
-
-    return render(
-        request,
-        "building_detail.html",
-        {
-            "building": building,
-            "locations": list(locations_qs),
-            "q": q,
-        },
-    )
+    return render(request, "dashboard.html", context)
 
 
 @login_required
 def applications_list(request):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     q = (request.GET.get("q") or "").strip()
+    status_id = (request.GET.get("status") or "").strip()
+    priority_id = (request.GET.get("priority") or "").strip()
+    executor_id = (request.GET.get("executor") or "").strip()
+    date_create_from = (request.GET.get("date_create_from") or "").strip()
+    date_create_to = (request.GET.get("date_create_to") or "").strip()
+    deadline_from = (request.GET.get("deadline_from") or "").strip()
+    deadline_to = (request.GET.get("deadline_to") or "").strip()
     applications = (
         Application.objects
+        .filter(organization=organization)
         .select_related("organization", "location", "equipment", "executor", "priority", "status")
         .order_by("-created_at")
     )
 
     if q:
-        applications = applications.filter(
+        search_query = (
             Q(name_application__icontains=q)
             | Q(about__icontains=q)
         )
+        if q.isdigit():
+            search_query |= Q(id=int(q))
+        applications = applications.filter(search_query)
 
+    if status_id:
+        applications = applications.filter(status_id=status_id)
+    if priority_id:
+        applications = applications.filter(priority_id=priority_id)
+    if executor_id:
+        applications = applications.filter(executor_id=executor_id)
+    if date_create_from:
+        applications = applications.filter(date_create__date__gte=date_create_from)
+    if date_create_to:
+        applications = applications.filter(date_create__date__lte=date_create_to)
+    if deadline_from:
+        applications = applications.filter(deadline__date__gte=deadline_from)
+    if deadline_to:
+        applications = applications.filter(deadline__date__lte=deadline_to)
+
+    filtered_applications = applications
+    completed_status_filter = Q(status__code="completed") | Q(status__name="Выполнено")
+    completed_applications = _mark_deadline_state(list(filtered_applications.filter(completed_status_filter)))
+    applications = _mark_deadline_state(
+        list(filtered_applications.exclude(completed_status_filter))
+    )
     statuses = ApplicationStatus.objects.order_by("name", "code")
-    status_groups = [
-        {
-            "status": status,
-            "count": applications.filter(status=status).count(),
-        }
-        for status in statuses
-    ]
-    unassigned_count = applications.filter(status__isnull=True).count()
+    priorities = ApplicationPriority.objects.order_by("weight", "name", "code")
+    executors = _organization_users_queryset(organization)
+    status_groups = _application_status_groups(filtered_applications)
+    status_chart = {
+        "labels": [group["label"] for group in status_groups],
+        "counts": [group["count"] for group in status_groups],
+        "colors": [group["color"] for group in status_groups],
+    }
 
     return render(
         request,
         "applications_list.html",
         {
             "applications": applications,
+            "completed_applications": completed_applications,
             "statuses": statuses,
+            "priorities": priorities,
+            "executors": executors,
             "status_groups": status_groups,
-            "unassigned_count": unassigned_count,
+            "status_chart": status_chart,
             "q": q,
+            "filters": {
+                "status": status_id,
+                "priority": priority_id,
+                "executor": executor_id,
+                "date_create_from": date_create_from,
+                "date_create_to": date_create_to,
+                "deadline_from": deadline_from,
+                "deadline_to": deadline_to,
+            },
         },
     )
 
 
 @login_required
 def application_detail(request, application_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     application = get_object_or_404(
         Application.objects.select_related(
             "organization",
@@ -248,10 +343,11 @@ def application_detail(request, application_id: int):
             "status",
         ),
         id=application_id,
+        organization=organization,
     )
     history = (
         History_Application.objects
-        .filter(application=application)
+        .filter(application=application, organization=organization)
         .select_related("user", "status_old", "status_new", "file")
         .order_by("-changed_at")
     )
@@ -272,21 +368,30 @@ def application_detail(request, application_id: int):
 
 @login_required
 def application_create(request):
-    current_organization = _get_current_organization(request.user)
+    current_organization = _require_current_organization(request)
+    if current_organization is None:
+        return _organization_access_denied(request)
 
     if request.method == "POST":
-        form = ApplicationForm(request.POST)
+        form = ApplicationForm(request.POST, hide_organization=True, organization=current_organization)
         if form.is_valid():
             application = form.save(commit=False)
             application.creator = request.user
             application.date_create = timezone.now()
-            if application.organization is None:
-                application.organization = current_organization
+            application.organization = current_organization
             application.save()
+            History_Application.objects.create(
+                organization=application.organization,
+                application=application,
+                user=request.user,
+                status_old=application.status,
+                status_new=application.status,
+                comment="Заявка создана",
+            )
             messages.success(request, "Заявка создана")
             return redirect("parmodels:application_detail", application_id=application.id)
     else:
-        form = ApplicationForm(initial={"organization": current_organization})
+        form = ApplicationForm(hide_organization=True, organization=current_organization)
 
     return render(
         request,
@@ -300,11 +405,61 @@ def application_create(request):
 
 
 @login_required
-@require_POST
-def application_status_update(request, application_id: int):
+def application_edit(request, application_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     application = get_object_or_404(
         Application.objects.select_related("organization", "status"),
         id=application_id,
+        organization=organization,
+    )
+    old_status = application.status
+
+    if request.method == "POST":
+        form = ApplicationEditForm(
+            request.POST,
+            instance=application,
+            hide_organization=True,
+            organization=organization,
+        )
+        if form.is_valid():
+            application = form.save()
+            History_Application.objects.create(
+                organization=application.organization,
+                application=application,
+                user=request.user,
+                status_old=old_status,
+                status_new=application.status,
+                comment="Были внесены изменения",
+            )
+            messages.success(request, "Заявка обновлена")
+            return redirect("parmodels:application_detail", application_id=application.id)
+    else:
+        form = ApplicationEditForm(instance=application, hide_organization=True, organization=organization)
+
+    return render(
+        request,
+        "application_form.html",
+        {
+            "form": form,
+            "title": "Редактирование заявки",
+            "cancel_url": "parmodels:application_detail",
+            "cancel_url_arg": application.id,
+        },
+    )
+
+
+@login_required
+@require_POST
+def application_status_update(request, application_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    application = get_object_or_404(
+        Application.objects.select_related("organization", "status"),
+        id=application_id,
+        organization=organization,
     )
     old_status = application.status
     form = ApplicationStatusForm(
@@ -341,9 +496,14 @@ def application_status_update(request, application_id: int):
 
 @login_required
 def locations_list(request):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     q = (request.GET.get("q") or "").strip()
+    equipment_presence = (request.GET.get("equipment_presence") or "").strip()
     locations = (
         Location.objects
+        .filter(organization=organization)
         .select_related("organization", "parent", "parent__parent")
         .annotate(equipment_count=Count("equipment"))
         .order_by("parent_id", "location_type", "name")
@@ -356,31 +516,41 @@ def locations_list(request):
             | Q(location_type__icontains=q)
         )
 
+    if equipment_presence == "has_equipment":
+        locations = locations.filter(equipment_count__gt=0)
+    elif equipment_presence == "no_equipment":
+        locations = locations.filter(equipment_count=0)
+
     return render(
         request,
         "locations_list.html",
         {
             "location_nodes": _location_tree_rows(list(locations)),
             "q": q,
+            "equipment_presence": equipment_presence,
         },
     )
 
 
 @login_required
 def location_detail_standalone(request, location_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     location = get_object_or_404(
         Location.objects.select_related("organization", "parent"),
         id=location_id,
+        organization=organization,
     )
     children = (
         Location.objects
-        .filter(parent=location)
+        .filter(parent=location, organization=organization)
         .select_related("organization", "parent")
         .order_by("location_type", "name")
     )
     equipment = (
         Equipment.objects
-        .filter(location=location)
+        .filter(location=location, organization=organization)
         .select_related("status", "type_equipment")
         .order_by("name_equipment", "inventory_number")
     )
@@ -398,23 +568,24 @@ def location_detail_standalone(request, location_id: int):
 
 @login_required
 def location_create_standalone(request):
-    current_organization = _get_current_organization(request.user)
+    current_organization = _require_current_organization(request)
+    if current_organization is None:
+        return _organization_access_denied(request)
 
     if request.method == "POST":
-        form = LocationForm(request.POST)
+        form = LocationForm(request.POST, hide_organization=True, organization=current_organization)
         if form.is_valid():
             location = form.save(commit=False)
-            if location.organization is None:
-                location.organization = current_organization
+            location.organization = current_organization
             location.save()
             messages.success(request, "Локация создана")
             return redirect("parmodels:location_detail_standalone", location_id=location.id)
     else:
-        form = LocationForm(initial={"organization": current_organization})
+        form = LocationForm(hide_organization=True, organization=current_organization)
 
     if "parent" in form.fields:
         form.fields["parent"].required = False
-        form.fields["parent"].queryset = Location.objects.select_related("organization").order_by(
+        form.fields["parent"].queryset = Location.objects.filter(organization=current_organization).select_related("organization").order_by(
             "organization__name", "location_type", "name"
         )
 
@@ -431,10 +602,53 @@ def location_create_standalone(request):
 
 
 @login_required
+def location_edit_standalone(request, location_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    location = get_object_or_404(Location, id=location_id, organization=organization)
+
+    if request.method == "POST":
+        form = LocationForm(request.POST, instance=location, hide_organization=True, organization=organization)
+        if form.is_valid():
+            location = form.save()
+            messages.success(request, "Локация обновлена")
+            return redirect("parmodels:location_detail_standalone", location_id=location.id)
+    else:
+        form = LocationForm(instance=location, hide_organization=True, organization=organization)
+
+    if "parent" in form.fields:
+        form.fields["parent"].required = False
+        form.fields["parent"].queryset = (
+            Location.objects
+            .filter(organization=organization)
+            .select_related("organization")
+            .exclude(id=location.id)
+            .order_by("organization__name", "location_type", "name")
+        )
+
+    return render(
+        request,
+        "location_form.html",
+        {
+            "form": form,
+            "mode": "edit",
+            "title": "Редактирование локации",
+            "cancel_url": "parmodels:location_detail_standalone",
+            "cancel_url_arg": location.id,
+        },
+    )
+
+
+@login_required
 def location_model_create(request, location_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     location = get_object_or_404(
         Location.objects.select_related("organization", "parent"),
         id=location_id,
+        organization=organization,
     )
 
     if request.method == "POST":
@@ -469,9 +683,13 @@ def location_model_create(request, location_id: int):
 
 @login_required
 def equipment_list(request):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     q = (request.GET.get("q") or "").strip()
     equipment = (
         Equipment.objects
+        .filter(organization=organization)
         .select_related("organization", "location", "status", "type_equipment")
         .order_by("name_equipment", "inventory_number")
     )
@@ -512,9 +730,13 @@ def equipment_list(request):
 
 @login_required
 def equipment_detail(request, equipment_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     equipment = get_object_or_404(
         Equipment.objects.select_related("organization", "location", "status", "type_equipment"),
         id=equipment_id,
+        organization=organization,
     )
     history = (
         History_Equipment.objects
@@ -525,7 +747,8 @@ def equipment_detail(request, equipment_id: int):
     status_form = EquipmentStatusForm(
         statuses=EquipmentStatus.objects.filter(is_active=True).order_by("name", "code"),
         applications=Application.objects.filter(
-            Q(equipment=equipment) | Q(equipment__isnull=True)
+            Q(equipment=equipment) | Q(equipment__isnull=True),
+            organization=organization,
         ).select_related("status").order_by("-created_at"),
         initial={"status": equipment.status},
     )
@@ -542,19 +765,20 @@ def equipment_detail(request, equipment_id: int):
 
 @login_required
 def equipment_create(request):
-    current_organization = _get_current_organization(request.user)
+    current_organization = _require_current_organization(request)
+    if current_organization is None:
+        return _organization_access_denied(request)
 
     if request.method == "POST":
-        form = EquipmentForm(request.POST)
+        form = EquipmentForm(request.POST, hide_organization=True, organization=current_organization)
         if form.is_valid():
             equipment = form.save(commit=False)
-            if equipment.organization is None:
-                equipment.organization = current_organization
+            equipment.organization = current_organization
             equipment.save()
             messages.success(request, "Оборудование создано")
             return redirect("parmodels:equipment_detail", equipment_id=equipment.id)
     else:
-        form = EquipmentForm(initial={"organization": current_organization})
+        form = EquipmentForm(hide_organization=True, organization=current_organization)
 
     return render(
         request,
@@ -568,18 +792,70 @@ def equipment_create(request):
 
 
 @login_required
-@require_POST
-def equipment_status_update(request, equipment_id: int):
+def equipment_edit(request, equipment_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
     equipment = get_object_or_404(
         Equipment.objects.select_related("organization", "status"),
         id=equipment_id,
+        organization=organization,
+    )
+
+    if request.method == "POST":
+        form = EquipmentEditForm(
+            request.POST,
+            instance=equipment,
+            hide_organization=True,
+            organization=organization,
+        )
+        if form.is_valid():
+            equipment = form.save()
+            History_Equipment.objects.create(
+                organization=equipment.organization,
+                equipment=equipment,
+                application=None,
+                user=request.user,
+                maintenance_type="Изменение данных",
+                description="Были внесены изменения",
+                result="Данные оборудования обновлены",
+                performed_at=timezone.now(),
+            )
+            messages.success(request, "Оборудование обновлено")
+            return redirect("parmodels:equipment_detail", equipment_id=equipment.id)
+    else:
+        form = EquipmentEditForm(instance=equipment, hide_organization=True, organization=organization)
+
+    return render(
+        request,
+        "equipment_form.html",
+        {
+            "form": form,
+            "title": "Редактирование оборудования",
+            "cancel_url": "parmodels:equipment_detail",
+            "cancel_url_arg": equipment.id,
+        },
+    )
+
+
+@login_required
+@require_POST
+def equipment_status_update(request, equipment_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    equipment = get_object_or_404(
+        Equipment.objects.select_related("organization", "status"),
+        id=equipment_id,
+        organization=organization,
     )
     old_status = equipment.status
     form = EquipmentStatusForm(
         request.POST,
         statuses=EquipmentStatus.objects.filter(is_active=True).order_by("name", "code"),
         applications=Application.objects.filter(
-            Q(equipment=equipment) | Q(equipment__isnull=True)
+            Q(equipment=equipment) | Q(equipment__isnull=True),
+            organization=organization,
         ).order_by("-created_at"),
     )
 
@@ -614,7 +890,10 @@ def equipment_status_update(request, equipment_id: int):
 
 @login_required
 def application_delete_confirm(request, application_id: int):
-    application = get_object_or_404(Application, id=application_id)
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    application = get_object_or_404(Application, id=application_id, organization=organization)
     return render(
         request,
         "confirm_delete.html",
@@ -631,7 +910,10 @@ def application_delete_confirm(request, application_id: int):
 @login_required
 @require_POST
 def application_delete(request, application_id: int):
-    application = get_object_or_404(Application, id=application_id)
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    application = get_object_or_404(Application, id=application_id, organization=organization)
     name = application.name_application
     application.delete()
     messages.success(request, f"Заявка удалена: {name}")
@@ -640,7 +922,10 @@ def application_delete(request, application_id: int):
 
 @login_required
 def equipment_delete_confirm(request, equipment_id: int):
-    equipment = get_object_or_404(Equipment, id=equipment_id)
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    equipment = get_object_or_404(Equipment, id=equipment_id, organization=organization)
     return render(
         request,
         "confirm_delete.html",
@@ -657,7 +942,10 @@ def equipment_delete_confirm(request, equipment_id: int):
 @login_required
 @require_POST
 def equipment_delete(request, equipment_id: int):
-    equipment = get_object_or_404(Equipment, id=equipment_id)
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    equipment = get_object_or_404(Equipment, id=equipment_id, organization=organization)
     name = equipment.name_equipment
     equipment.delete()
     messages.success(request, f"Оборудование удалено: {name}")
@@ -666,7 +954,10 @@ def equipment_delete(request, equipment_id: int):
 
 @login_required
 def location_delete_confirm(request, location_id: int):
-    location = get_object_or_404(Location, id=location_id)
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    location = get_object_or_404(Location, id=location_id, organization=organization)
     descendant_count = len(_location_descendant_ids(location))
     return render(
         request,
@@ -689,13 +980,16 @@ def location_delete_confirm(request, location_id: int):
 @login_required
 @require_POST
 def location_delete(request, location_id: int):
-    location = get_object_or_404(Location, id=location_id)
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    location = get_object_or_404(Location, id=location_id, organization=organization)
     name = location.name
     descendant_ids = _location_descendant_ids(location)
     ids_to_delete = descendant_ids + [location.id]
 
     with transaction.atomic():
-        Location.objects.filter(id__in=ids_to_delete).delete()
+        Location.objects.filter(id__in=ids_to_delete, organization=organization).delete()
 
     messages.success(request, f"Локация удалена: {name}")
     return redirect("parmodels:locations_list")
@@ -703,262 +997,232 @@ def location_delete(request, location_id: int):
 
 @login_required
 def users_list(request):
-    User = get_user_model()
+    membership = get_current_membership(request.user)
+    if membership is None:
+        return _organization_access_denied(request)
+    organization = membership.organization
     q = (request.GET.get("q") or "").strip()
-    users = (
-        User.objects
-        .prefetch_related(
-            "organization_memberships__organization",
-            "organization_memberships__department",
-        )
-        .order_by("last_name", "first_name", "email")
+    organization_id = (request.GET.get("organization") or "").strip()
+    department_id = (request.GET.get("department") or "").strip()
+    date_reception_from = (request.GET.get("date_reception_from") or "").strip()
+    date_reception_to = (request.GET.get("date_reception_to") or "").strip()
+    memberships = (
+        OrganizationMembership.objects
+        .filter(organization=organization, status=OrganizationMembership.Status.ACTIVE)
+        .select_related("user", "organization", "department")
+        .order_by("user__last_name", "user__first_name", "user__email")
     )
 
     if q:
-        users = users.filter(
-            Q(first_name__icontains=q)
-            | Q(last_name__icontains=q)
-            | Q(email__icontains=q)
-            | Q(username__icontains=q)
+        memberships = memberships.filter(
+            Q(user__first_name__icontains=q)
+            | Q(user__last_name__icontains=q)
+            | Q(user__email__icontains=q)
+            | Q(user__username__icontains=q)
         )
 
-    return render(request, "users_list.html", {"users": users, "q": q})
+    if organization_id and organization_id != str(organization.id):
+        memberships = memberships.none()
+    if department_id:
+        memberships = memberships.filter(department_id=department_id)
+    if date_reception_from:
+        memberships = memberships.filter(date_reception__gte=date_reception_from)
+    if date_reception_to:
+        memberships = memberships.filter(date_reception__lte=date_reception_to)
+
+    departments = Department.objects.filter(organization=organization).order_by("name")
+
+    return render(
+        request,
+        "users_list.html",
+        {
+            "memberships": memberships,
+            "q": q,
+            "organizations": [organization],
+            "departments": departments,
+            "current_organization": organization,
+            "can_invite_users": membership.role == OrganizationMembership.Role.ADMIN,
+            "filters": {
+                "organization": organization_id,
+                "department": department_id,
+                "date_reception_from": date_reception_from,
+                "date_reception_to": date_reception_to,
+            },
+        },
+    )
+
+
+@login_required
+def organization_invitation_create(request):
+    membership = get_current_membership(request.user)
+    if membership is None:
+        return _organization_access_denied(request)
+    if not user_is_org_admin(request.user):
+        messages.error(request, "Приглашать сотрудников может только администратор организации.")
+        return redirect("parmodels:users_list")
+
+    organization = membership.organization
+    if request.method == "POST":
+        form = OrganizationInvitationForm(request.POST, organization=organization)
+        if form.is_valid():
+            invitation = form.save(commit=False)
+            invitation.organization = organization
+            invitation.invited_by = request.user
+            invitation.status = OrganizationInvitation.Status.PENDING
+            invitation.expires_at = timezone.now() + timedelta(days=7)
+            invitation.save()
+            invite_url = request.build_absolute_uri(
+                reverse("parmodels:organization_invitation_accept", args=[invitation.token])
+            )
+            return render(
+                request,
+                "organization_invitation_done.html",
+                {"invitation": invitation, "invite_url": invite_url},
+            )
+    else:
+        form = OrganizationInvitationForm(organization=organization)
+
+    return render(
+        request,
+        "organization_invitation_form.html",
+        {"form": form, "organization": organization},
+    )
+
+
+def _activate_invitation_membership(invitation, user):
+    membership, _ = OrganizationMembership.objects.update_or_create(
+        organization=invitation.organization,
+        user=user,
+        defaults={
+            "role": invitation.role,
+            "status": OrganizationMembership.Status.ACTIVE,
+            "department": invitation.department,
+            "position": invitation.position,
+            "date_reception": invitation.date_reception,
+            "invited_by": invitation.invited_by,
+            "joined_at": timezone.now(),
+        },
+    )
+    invitation.status = OrganizationInvitation.Status.ACCEPTED
+    invitation.accepted_at = timezone.now()
+    invitation.save(update_fields=["status", "accepted_at"])
+    return membership
+
+
+def organization_invitation_accept(request, token):
+    invitation = get_object_or_404(
+        OrganizationInvitation.objects.select_related("organization", "department", "invited_by"),
+        token=token,
+    )
+
+    if invitation.status != OrganizationInvitation.Status.PENDING:
+        return render(
+            request,
+            "organization_invitation_invalid.html",
+            {"invitation": invitation, "reason": "Приглашение уже использовано или отменено."},
+            status=400,
+        )
+
+    if invitation.expires_at < timezone.now():
+        invitation.status = OrganizationInvitation.Status.EXPIRED
+        invitation.save(update_fields=["status"])
+        return render(
+            request,
+            "organization_invitation_invalid.html",
+            {"invitation": invitation, "reason": "Срок действия приглашения истек."},
+            status=400,
+        )
+
+    User = get_user_model()
+    existing_user = User.objects.filter(email__iexact=invitation.email).first()
+
+    if existing_user:
+        if request.method == "POST":
+            _activate_invitation_membership(invitation, existing_user)
+            messages.success(request, "Приглашение принято. Теперь можно войти в систему.")
+            return redirect("parmodels:login")
+        return render(
+            request,
+            "organization_invitation_accept.html",
+            {"invitation": invitation, "existing_user": existing_user},
+        )
+
+    if request.method == "POST":
+        form = InvitationRegistrationForm(request.POST, email=invitation.email)
+        if form.is_valid():
+            user = form.save()
+            _activate_invitation_membership(invitation, user)
+            messages.success(request, "Аккаунт создан. Теперь можно войти в систему.")
+            return redirect("parmodels:login")
+    else:
+        initial_username = invitation.email.split("@", 1)[0]
+        form = InvitationRegistrationForm(email=invitation.email, initial={"username": initial_username})
+
+    return render(
+        request,
+        "organization_invitation_accept.html",
+        {"invitation": invitation, "form": form, "existing_user": None},
+    )
 
 
 @login_required
 def user_detail(request, user_id: int):
+    current_membership = get_current_membership(request.user)
+    if current_membership is None:
+        return _organization_access_denied(request)
+    organization = current_membership.organization
     User = get_user_model()
     user_obj = get_object_or_404(
-        User.objects.prefetch_related(
-            "organization_memberships__organization",
-            "organization_memberships__department",
-        ),
+        User.objects,
         id=user_id,
+        organization_memberships__organization=organization,
+        organization_memberships__status=OrganizationMembership.Status.ACTIVE,
     )
-    return render(request, "user_detail.html", {"user_obj": user_obj})
+    memberships = (
+        OrganizationMembership.objects
+        .filter(user=user_obj, organization=organization)
+        .select_related("organization", "department")
+    )
+    return render(request, "user_detail.html", {"user_obj": user_obj, "memberships": memberships})
 
 
 @login_required
 def profile(request):
+    current_membership = get_current_membership(request.user)
+    if current_membership is None:
+        return _organization_access_denied(request)
     memberships = (
         OrganizationMembership.objects
-        .filter(user=request.user)
+        .filter(user=request.user, organization=current_membership.organization)
         .select_related("organization", "department")
         .order_by("organization__name", "department__name")
     )
     return render(request, "profile.html", {"memberships": memberships})
 
 
-@require_POST
-def logout_view(request):
-    logout(request)
-    return redirect("parmodels:login")
-
-
 @login_required
-def location_detail(request, building_id: int, location_id: int):
-    building = _get_building_location(building_id)
-    location = get_object_or_404(Location, id=location_id)
-
-    models = (
-        LocationModel.objects
-        .filter(location=location)
-        .order_by("-created_at")
-    )
-    files = (
-        File.objects
-        .filter(Q(organization=location.organization) | Q(organization__isnull=True))
-        .order_by("-created_at")
-    )
-    equipment = (
-        Equipment.objects
-        .filter(location=location)
-        .select_related("status", "type_equipment")
-        .order_by("name_equipment", "inventory_number")
-    )
+def profile_edit(request):
+    if request.method == "POST":
+        form = UserProfileForm(request.POST, instance=request.user)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Профиль обновлен")
+            return redirect("parmodels:profile")
+    else:
+        form = UserProfileForm(instance=request.user)
 
     return render(
         request,
-        "location_detail.html",
+        "profile_form.html",
         {
-            "building": building,
-            "location": location,
-            "models": models,
-            "files": files,
-            "equipment": equipment,
+            "form": form,
+            "title": "Редактирование профиля",
+            "cancel_url": "parmodels:profile",
         },
     )
 
 
-@login_required
-def location_create(request, building_id):
-    building = _get_building_location(building_id)
-
-    if request.method == "POST":
-        form = LocationForm(request.POST)
-        if form.is_valid():
-            loc = form.save(commit=False)
-            loc.organization = building.organization
-            if loc.parent is None:
-                loc.parent = building
-            loc.save()
-            messages.success(request, "Локация создана")
-            return redirect("parmodels:building_detail", building_id=building.id)
-    else:
-        form = LocationForm(initial={"organization": building.organization, "parent": building})
-
-    if "parent" in form.fields:
-        form.fields["parent"].queryset = (
-            Location.objects
-            .filter(Q(organization=building.organization) | Q(id=building.id))
-            .order_by("location_type", "name")
-        )
-
-    return render(request, "location_form.html", {
-        "building": building,
-        "form": form,
-        "mode": "create",
-        "title": "Новая локация",
-        "cancel_url": "parmodels:building_detail",
-    })
-
-
-@login_required
-def location_edit(request, building_id, location_id):
-    building = _get_building_location(building_id)
-    location = get_object_or_404(Location, id=location_id)
-
-    if request.method == "POST":
-        form = LocationForm(request.POST, instance=location)
-        if form.is_valid():
-            form.save()
-            messages.success(request, "Локация обновлена")
-            return redirect("parmodels:location_detail", building_id=building.id, location_id=location.id)
-    else:
-        form = LocationForm(instance=location)
-
-    if "parent" in form.fields:
-        form.fields["parent"].queryset = (
-            Location.objects
-            .filter(Q(organization=building.organization) | Q(id=building.id))
-            .exclude(id=location.id)
-            .order_by("location_type", "name")
-        )
-
-    return render(request, "location_form.html", {
-        "building": building,
-        "location": location,
-        "form": form,
-        "mode": "edit",
-        "title": "Редактирование локации",
-        "cancel_url": "parmodels:building_detail",
-    })
-
-
-@login_required
-def ifc_model_upload(request, building_id: int, location_id: int):
-    building = _get_building_location(building_id)
-    location = get_object_or_404(Location, id=location_id)
-
-    if request.method == "POST":
-        form = FileUploadForm(request.POST, request.FILES)
-        if form.is_valid():
-            obj = form.save(commit=False)
-            obj.organization = location.organization
-            obj.file_type = "ifc"
-            if obj.file_path:
-                obj.file_size = obj.file_path.size
-            obj.save()
-            messages.success(request, "Файл загружен")
-            return redirect("parmodels:location_detail", building_id=building.id, location_id=location.id)
-    else:
-        form = FileUploadForm()
-
-    return render(
-        request,
-        "ifc_model_upload.html",
-        {"building": building, "location": location, "form": form},
-    )
-
-
-@login_required
 @require_POST
-def ifc_model_delete(request, building_id: int, location_id: int, ifc_model_id: int):
-    building = _get_building_location(building_id)
-    location = get_object_or_404(Location, id=location_id)
-    obj = get_object_or_404(LocationModel, id=ifc_model_id, location=location)
-
-    name = obj.name
-    obj.delete()
-
-    messages.success(request, f"Удалено: {name}")
-    return redirect("parmodels:location_detail", building_id=building.id, location_id=location.id)
-
-
-@login_required
-def ifc_ingest_json(request, building_id: int, location_id: int, ifc_id: int):
-    if request.content_type != "application/json":
-        return HttpResponseBadRequest("Expected application/json")
-
-    building = _get_building_location(building_id)
-    location = get_object_or_404(Location, id=location_id)
-    file_obj = get_object_or_404(File, id=ifc_id)
-
-    try:
-        payload = json.loads(request.body.decode("utf-8"))
-    except Exception:
-        return HttpResponseBadRequest("Invalid JSON")
-
-    model = LocationModel.objects.create(
-        location=location,
-        name=file_obj.file_name,
-        model_json=payload,
-    )
-
-    return JsonResponse(
-        {"ok": True, "created": 1, "model_id": model.id, "building_id": building.id}
-    )
-
-
-@login_required
-def location_equipment(request, building_id: int, location_id: int):
-    building = _get_building_location(building_id)
-    location = get_object_or_404(Location, pk=location_id)
-
-    equipments = (
-        Equipment.objects
-        .filter(location=location)
-        .select_related("status", "type_equipment", "organization", "location")
-        .order_by("name_equipment", "inventory_number")
-    )
-
-    q = (request.GET.get("q") or "").strip()
-    if q:
-        equipments = equipments.filter(
-            Q(name_equipment__icontains=q)
-            | Q(inventory_number__icontains=q)
-            | Q(external_id__icontains=q)
-            | Q(type_equipment__name__icontains=q)
-            | Q(status__name__icontains=q)
-        )
-
-    type_code = (request.GET.get("type") or "").strip()
-    if type_code:
-        equipments = equipments.filter(type_equipment__code=type_code)
-
-    type_choices = (
-        EquipmentType.objects
-        .filter(equipment__location=location)
-        .distinct()
-        .order_by("code")
-    )
-
-    context = {
-        "building": building,
-        "location": location,
-        "equipments": equipments,
-        "q": q,
-        "type_code": type_code,
-        "type_choices": type_choices,
-    }
-    return render(request, "location_equipment.html", context)
+def logout_view(request):
+    logout(request)
+    return redirect("parmodels:login")

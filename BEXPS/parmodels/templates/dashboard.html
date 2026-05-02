@@ -1,11 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}Статистика{% endblock %}
 
 {% block content %}
 <div class="d-flex flex-column flex-lg-row align-items-lg-end justify-content-between gap-3 mb-4">
   <div>
-    <h1 class="h3 mb-1">Dashboard</h1>
-    <div class="text-secondary">Быстрый доступ к ключевым разделам системы</div>
+    <h1 class="h3 mb-1">Статистика</h1>
+    <div class="text-secondary">
+      Быстрый доступ к ключевым разделам системы{% if current_organization %}: {{ current_organization.name }}{% endif %}
+    </div>
   </div>
   <a class="btn btn-outline-secondary" href="/admin/" target="_blank">Открыть админку</a>
 </div>
@@ -41,7 +43,7 @@
           <span class="badge text-bg-success fs-6">{{ locations_count|default:0 }}</span>
         </div>
         <div class="text-secondary small mb-3">
-          Корневые объекты доступны на текущей странице и в дереве локаций.
+          Дерево локаций строится от корневых объектов до зон.
         </div>
         <a class="btn btn-primary mt-auto" href="{% url 'parmodels:locations_list' %}">Перейти к локациям</a>
       </div>
@@ -59,7 +61,7 @@
           <span class="badge text-bg-warning fs-6">{{ equipment_count|default:0 }}</span>
         </div>
         <div class="text-secondary small mb-3">
-          Оборудование открывается из карточки конкретной локации.
+          Оборудование привязано к актуальным локациям.
         </div>
         <a class="btn btn-primary mt-auto" href="{% url 'parmodels:equipment_list' %}">Перейти к оборудованию</a>
       </div>
@@ -83,39 +85,5 @@
       </div>
     </div>
   </div>
-</div>
-
-<div class="mt-4">
-  <h2 class="h5 mb-3">Объекты</h2>
-  {% if buildings %}
-    <div class="row g-3">
-      {% for b in buildings %}
-        <div class="col-12 col-md-6 col-lg-4">
-          <div class="card h-100">
-            <div class="card-body">
-              <div class="d-flex justify-content-between align-items-start">
-                <div>
-                  <div class="fw-semibold">
-                    <a class="text-decoration-none" href="{% url 'parmodels:building_detail' b.id %}">{{ b.name }}</a>
-                  </div>
-                  <div class="text-secondary small mt-1">{{ b.address_location }}</div>
-                </div>
-                <span class="badge text-bg-light">id {{ b.id }}</span>
-              </div>
-            </div>
-            <div class="card-footer bg-transparent border-0 pt-0">
-              <a class="btn btn-sm btn-primary" href="{% url 'parmodels:building_detail' b.id %}">Открыть</a>
-            </div>
-          </div>
-        </div>
-      {% endfor %}
-    </div>
-  {% else %}
-    <div class="card">
-      <div class="card-body text-secondary">
-        Пока нет объектов. Добавь в админке локацию с типом building.
-      </div>
-    </div>
-  {% endif %}
 </div>
 {% endblock %}

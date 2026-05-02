@@ -11,10 +11,17 @@
 </div>
 
 <form method="get" class="row g-2 mb-3">
-  <div class="col-12 col-md-9 col-lg-10">
+  <div class="col-12 col-md-7 col-lg-8">
     <input class="form-control" type="search" name="q" value="{{ q }}" placeholder="Поиск по названию, описанию или типу">
   </div>
-  <div class="col-12 col-md-3 col-lg-2 d-grid">
+  <div class="col-12 col-md-3 col-lg-2">
+    <select class="form-select" name="equipment_presence" aria-label="Наличие оборудования">
+      <option value="" {% if not equipment_presence %}selected{% endif %}>Все локации</option>
+      <option value="has_equipment" {% if equipment_presence == "has_equipment" %}selected{% endif %}>Есть оборудование</option>
+      <option value="no_equipment" {% if equipment_presence == "no_equipment" %}selected{% endif %}>Нет оборудования</option>
+    </select>
+  </div>
+  <div class="col-12 col-md-2 col-lg-2 d-grid">
     <button class="btn btn-outline-primary" type="submit">Найти</button>
   </div>
 </form>

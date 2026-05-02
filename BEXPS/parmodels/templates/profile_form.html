@@ -5,13 +5,9 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h1 class="h3 mb-1">{{ title }}</h1>
-    <div class="text-secondary">Заявка с привязкой к локации, оборудованию и справочникам</div>
+    <div class="text-secondary">Основные данные учетной записи</div>
   </div>
-  {% if cancel_url_arg %}
-    <a class="btn btn-outline-secondary" href="{% url cancel_url cancel_url_arg %}">Назад</a>
-  {% else %}
-    <a class="btn btn-outline-secondary" href="{% url cancel_url %}">Назад</a>
-  {% endif %}
+  <a class="btn btn-outline-secondary" href="{% url cancel_url %}">Назад</a>
 </div>
 
 <div class="card">
@@ -26,16 +22,6 @@
         <div class="mb-3">
           <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
           {{ field }}
-          {% if field.name == "executor_search" %}
-            <datalist id="executor-options">
-              {% for label, user_id in form.executor_options %}
-                <option value="{{ label }}"></option>
-              {% endfor %}
-            </datalist>
-          {% endif %}
-          {% if field.help_text %}
-            <div class="form-text">{{ field.help_text }}</div>
-          {% endif %}
           {% for error in field.errors %}
             <div class="text-danger small mt-1">{{ error }}</div>
           {% endfor %}

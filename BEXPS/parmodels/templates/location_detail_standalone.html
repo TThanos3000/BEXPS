@@ -6,6 +6,7 @@
   <a class="text-secondary text-decoration-none" href="{% url 'parmodels:locations_list' %}">← назад к локациям</a>
   <div class="d-flex gap-2">
     <a class="btn btn-primary" href="{% url 'parmodels:location_model_create' location.id %}">Добавить техплан</a>
+    <a class="btn btn-outline-primary" href="{% url 'parmodels:location_edit_standalone' location.id %}">Редактировать</a>
     <a class="btn btn-outline-danger" href="{% url 'parmodels:location_delete_confirm' location.id %}">Удалить</a>
   </div>
 </div>

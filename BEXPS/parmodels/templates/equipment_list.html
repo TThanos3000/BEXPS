@@ -63,32 +63,30 @@
         <thead>
           <tr>
             <th>Название</th>
-            <th>Инв. номер</th>
             <th>Статус</th>
             <th>Тип</th>
             <th>Локация</th>
             <th>Организация</th>
             <th>Дата ввода</th>
-            <th class="text-end">Действие</th>
           </tr>
         </thead>
         <tbody>
           {% for item in equipment %}
             <tr>
-              <td class="fw-semibold">{{ item.name_equipment }}</td>
-              <td>{{ item.inventory_number|default:"—" }}</td>
+              <td class="fw-semibold">
+                <a class="text-decoration-none" href="{% url 'parmodels:equipment_detail' item.id %}">
+                  {{ item.name_equipment }}
+                </a>
+              </td>
               <td>{{ item.status.name|default:"—" }}</td>
               <td>{{ item.type_equipment.name|default:"—" }}</td>
               <td>{{ item.location.name|default:"—" }}</td>
               <td>{{ item.organization.name|default:"—" }}</td>
               <td class="text-secondary small">{{ item.date_input|default:"—" }}</td>
-              <td class="text-end">
-                <a class="btn btn-sm btn-outline-primary" href="{% url 'parmodels:equipment_detail' item.id %}">Подробнее</a>
-              </td>
             </tr>
           {% empty %}
             <tr>
-              <td colspan="8" class="text-secondary">Оборудование не найдено.</td>
+              <td colspan="6" class="text-secondary">Оборудование не найдено.</td>
             </tr>
           {% endfor %}
         </tbody>

@@ -55,17 +55,27 @@ class EquipmentTypeAdmin(admin.ModelAdmin):
 
 @admin.register(ApplicationStatus)
 class ApplicationStatusAdmin(admin.ModelAdmin):
-    list_display = ("id", "code", "name", "is_active")
-    list_filter = ("is_active",)
-    search_fields = ("code", "name", "description")
+    list_display = ("id", "code", "name", "color_code", "is_active", "is_system")
+    list_filter = ("is_active", "is_system")
+    search_fields = ("code", "name", "description", "color_code")
     ordering = ("code",)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.is_system:
+            return False
+        return super().has_delete_permission(request, obj)
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
 
 
 @admin.register(ApplicationPriority)
 class ApplicationPriorityAdmin(admin.ModelAdmin):
-    list_display = ("id", "code", "name", "weight", "is_active")
+    list_display = ("id", "code", "name", "color_code", "weight", "is_active")
     list_filter = ("is_active",)
-    search_fields = ("code", "name", "description")
+    search_fields = ("code", "name", "description", "color_code")
     ordering = ("weight", "code")
 
 
@@ -199,10 +209,22 @@ class OrganizationMembershipAdmin(admin.ModelAdmin):
 
 @admin.register(OrganizationInvitation)
 class OrganizationInvitationAdmin(admin.ModelAdmin):
-    list_display = ("id", "organization", "email", "role", "status", "invited_by", "expires_at", "created_at")
-    list_filter = ("role", "status", "organization", "created_at", "expires_at")
-    search_fields = ("organization__name", "email", "token", "invited_by__username", "invited_by__email")
-    autocomplete_fields = ("organization", "invited_by")
+    list_display = (
+        "id",
+        "organization",
+        "email",
+        "role",
+        "status",
+        "department",
+        "position",
+        "date_reception",
+        "invited_by",
+        "expires_at",
+        "created_at",
+    )
+    list_filter = ("role", "status", "organization", "department", "created_at", "expires_at")
+    search_fields = ("organization__name", "email", "token", "invited_by__username", "invited_by__email", "position")
+    autocomplete_fields = ("organization", "department", "invited_by")
     readonly_fields = ("token", "created_at")
     date_hierarchy = "created_at"
     ordering = ("-created_at",)

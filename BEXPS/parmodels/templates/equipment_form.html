@@ -5,9 +5,13 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
     <h1 class="h3 mb-1">{{ title }}</h1>
-    <div class="text-secondary">Создание оборудования с привязкой к локации и справочникам</div>
+    <div class="text-secondary">Оборудование с привязкой к локации и справочникам</div>
   </div>
-  <a class="btn btn-outline-secondary" href="{% url cancel_url %}">Назад</a>
+  {% if cancel_url_arg %}
+    <a class="btn btn-outline-secondary" href="{% url cancel_url cancel_url_arg %}">Назад</a>
+  {% else %}
+    <a class="btn btn-outline-secondary" href="{% url cancel_url %}">Назад</a>
+  {% endif %}
 </div>
 
 <div class="card">
@@ -31,7 +35,7 @@
         </div>
       {% endfor %}
 
-      <button class="btn btn-primary" type="submit">Создать</button>
+      <button class="btn btn-primary" type="submit">Сохранить</button>
     </form>
   </div>
 </div>

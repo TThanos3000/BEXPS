@@ -27,7 +27,7 @@
 <div class="card">
   <div class="card-body">
     <h2 class="h6 mb-3">Членство в организациях</h2>
-    {% if user_obj.organization_memberships.all %}
+    {% if memberships %}
       <div class="table-responsive">
         <table class="table align-middle">
           <thead>
@@ -40,7 +40,7 @@
             </tr>
           </thead>
           <tbody>
-            {% for membership in user_obj.organization_memberships.all %}
+            {% for membership in memberships %}
               <tr>
                 <td>{{ membership.organization.name|default:"—" }}</td>
                 <td>{{ membership.department.name|default:"—" }}</td>

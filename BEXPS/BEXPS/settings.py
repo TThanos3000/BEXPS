@@ -143,5 +143,5 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 LOGIN_URL = "parmodels:login"
-LOGIN_REDIRECT_URL = "parmodels:building_list"
+LOGIN_REDIRECT_URL = "parmodels:dashboard"
 LOGOUT_REDIRECT_URL = "parmodels:login"

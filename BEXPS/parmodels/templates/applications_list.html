@@ -19,67 +19,175 @@
   </div>
 </form>
 
-<div class="row g-3 mb-4">
-  {% for group in status_groups %}
-    <div class="col-12 col-sm-6 col-lg-3">
+<div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+  <button class="btn btn-outline-primary" type="button" data-bs-toggle="modal" data-bs-target="#applicationsFiltersModal">
+    Фильтры
+  </button>
+  <a class="btn btn-outline-secondary" href="{% url 'parmodels:applications_list' %}">Сбросить</a>
+</div>
+
+<div class="modal fade" id="applicationsFiltersModal" tabindex="-1" aria-labelledby="applicationsFiltersModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="get">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="applicationsFiltersModalLabel">Фильтры заявок</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="q" value="{{ q }}">
+          <div class="row g-3">
+            <div class="col-12 col-md-6 col-xl-3">
+              <label class="form-label small text-secondary" for="statusFilter">Статус</label>
+              <select class="form-select" id="statusFilter" name="status">
+                <option value="">Все статусы</option>
+                {% for status in statuses %}
+                  <option value="{{ status.id }}" {% if filters.status == status.id|stringformat:"s" %}selected{% endif %}>{{ status.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+              <label class="form-label small text-secondary" for="priorityFilter">Приоритет</label>
+              <select class="form-select" id="priorityFilter" name="priority">
+                <option value="">Все приоритеты</option>
+                {% for priority in priorities %}
+                  <option value="{{ priority.id }}" {% if filters.priority == priority.id|stringformat:"s" %}selected{% endif %}>{{ priority.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+              <label class="form-label small text-secondary" for="executorFilter">Исполнитель</label>
+              <select class="form-select" id="executorFilter" name="executor">
+                <option value="">Все исполнители</option>
+                {% for executor in executors %}
+                  <option value="{{ executor.id }}" {% if filters.executor == executor.id|stringformat:"s" %}selected{% endif %}>
+                    {{ executor.get_full_name|default:executor.username }}{% if executor.email %} · {{ executor.email }}{% endif %}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+              <label class="form-label small text-secondary" for="dateCreateFrom">Дата создания от</label>
+              <input class="form-control" id="dateCreateFrom" type="date" name="date_create_from" value="{{ filters.date_create_from }}">
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+              <label class="form-label small text-secondary" for="dateCreateTo">Дата создания до</label>
+              <input class="form-control" id="dateCreateTo" type="date" name="date_create_to" value="{{ filters.date_create_to }}">
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+              <label class="form-label small text-secondary" for="deadlineFrom">Дедлайн от</label>
+              <input class="form-control" id="deadlineFrom" type="date" name="deadline_from" value="{{ filters.deadline_from }}">
+            </div>
+            <div class="col-12 col-md-6 col-xl-3">
+              <label class="form-label small text-secondary" for="deadlineTo">Дедлайн до</label>
+              <input class="form-control" id="deadlineTo" type="date" name="deadline_to" value="{{ filters.deadline_to }}">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <a class="btn btn-outline-secondary" href="{% url 'parmodels:applications_list' %}">Сбросить</a>
+          <button class="btn btn-primary" type="submit">Применить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="mb-3">
+  <button class="btn btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#applicationsStats" aria-expanded="false" aria-controls="applicationsStats">
+    Показать статистику
+  </button>
+</div>
+
+<div class="collapse mb-4" id="applicationsStats">
+  <div class="row g-3 align-items-stretch">
+    <div class="col-12 col-lg-8">
+      <div class="row g-3 h-100">
+        {% for group in status_groups %}
+          <div class="col-12 col-sm-6 col-xl-4">
+            <div class="card h-100">
+              <div class="card-body">
+                <div class="text-secondary small">Статус</div>
+                <div class="d-flex justify-content-between align-items-center">
+                  <strong>{{ group.label }}</strong>
+                  <span class="badge" style="background-color: {{ group.color }};">{{ group.count }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        {% empty %}
+          <div class="col-12">
+            <div class="alert alert-light border mb-0">Справочник статусов заявок пока пуст.</div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="col-12 col-lg-4">
       <div class="card h-100">
         <div class="card-body">
-          <div class="text-secondary small">{{ group.status.code }}</div>
-          <div class="d-flex justify-content-between align-items-center">
-            <strong>{{ group.status.name }}</strong>
-            <span class="badge text-bg-primary">{{ group.count }}</span>
+          <h2 class="h6 mb-3">Распределение по статусам</h2>
+          <div style="max-width: 280px; margin: 0 auto;">
+            <canvas id="applicationsStatusChart" height="220"></canvas>
           </div>
         </div>
       </div>
     </div>
-  {% empty %}
-    <div class="col-12">
-      <div class="alert alert-light border mb-0">Справочник статусов заявок пока пуст.</div>
-    </div>
-  {% endfor %}
-  {% if unassigned_count %}
-    <div class="col-12 col-sm-6 col-lg-3">
-      <div class="card h-100">
-        <div class="card-body d-flex justify-content-between align-items-center">
-          <strong>Без статуса</strong>
-          <span class="badge text-bg-secondary">{{ unassigned_count }}</span>
-        </div>
-      </div>
-    </div>
-  {% endif %}
+  </div>
 </div>
 
-<div class="card">
+<div class="card mb-4">
   <div class="card-body">
     <div class="table-responsive">
       <table class="table align-middle">
         <thead>
           <tr>
+            <th>Номер заявки</th>
             <th>Название</th>
             <th>Статус</th>
             <th>Приоритет</th>
             <th>Исполнитель</th>
-            <th>Дата создания</th>
             <th>Дедлайн</th>
-            <th class="text-end">Действие</th>
           </tr>
         </thead>
         <tbody>
           {% for application in applications %}
             <tr>
+              <td class="small">
+                <a class="text-decoration-none" href="{% url 'parmodels:application_detail' application.id %}">
+                  №{{ application.id }} от {{ application.date_create|default:application.created_at|date:"j E Y г. H:i" }}
+                </a>
+              </td>
               <td class="fw-semibold">{{ application.name_application }}</td>
-              <td>{{ application.status.name|default:"—" }}</td>
-              <td>{{ application.priority.name|default:"—" }}</td>
+              <td>
+                {% if application.status %}
+                  <span class="badge" style="background-color: {{ application.status_color }};">{{ application.status.name }}</span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>
+                {% if application.priority %}
+                  <span class="badge" style="background-color: {{ application.priority_color }};">{{ application.priority.name }}</span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
               <td>{{ application.executor.get_full_name|default:application.executor.email|default:"—" }}</td>
-              <td class="text-secondary small">{{ application.created_at|default:application.date_create }}</td>
-              <td class="text-secondary small">{{ application.deadline|default:"—" }}</td>
-              <td class="text-end">
-                <a class="btn btn-sm btn-outline-primary" href="{% url 'parmodels:application_detail' application.id %}">Подробнее</a>
+              <td>
+                {% if application.deadline %}
+                  {% if application.deadline_is_urgent %}
+                    <span class="badge text-bg-danger">{{ application.deadline }}</span>
+                  {% else %}
+                    <span class="badge text-bg-light border text-dark">{{ application.deadline }}</span>
+                  {% endif %}
+                {% else %}
+                  <span class="text-secondary">Не указан</span>
+                {% endif %}
               </td>
             </tr>
           {% empty %}
             <tr>
-              <td colspan="7" class="text-secondary">Заявки не найдены.</td>
+              <td colspan="6" class="text-secondary">Заявки не найдены.</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -87,4 +195,98 @@
     </div>
   </div>
 </div>
+
+<div class="card">
+  <div class="card-body">
+    <button class="btn btn-outline-success mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#completedApplications" aria-expanded="false" aria-controls="completedApplications">
+      Выполненные заявки: {{ completed_applications|length }}
+    </button>
+    <div class="collapse" id="completedApplications">
+      <h2 class="h5 mb-3">Выполненные заявки</h2>
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Номер заявки</th>
+              <th>Название</th>
+              <th>Статус</th>
+              <th>Приоритет</th>
+              <th>Исполнитель</th>
+              <th>Дедлайн</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for application in completed_applications %}
+              <tr>
+                <td class="small">
+                  <a class="text-decoration-none" href="{% url 'parmodels:application_detail' application.id %}">
+                    №{{ application.id }} от {{ application.date_create|default:application.created_at|date:"j E Y г. H:i" }}
+                  </a>
+                </td>
+                <td class="fw-semibold">{{ application.name_application }}</td>
+                <td>
+                  {% if application.status %}
+                    <span class="badge" style="background-color: {{ application.status_color }};">{{ application.status.name }}</span>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>
+                  {% if application.priority %}
+                    <span class="badge" style="background-color: {{ application.priority_color }};">{{ application.priority.name }}</span>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ application.executor.get_full_name|default:application.executor.email|default:"—" }}</td>
+                <td>
+                  {% if application.deadline %}
+                    {% if application.deadline_is_urgent %}
+                      <span class="badge text-bg-danger">{{ application.deadline }}</span>
+                    {% else %}
+                      <span class="badge text-bg-light border text-dark">{{ application.deadline }}</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="text-secondary">Не указан</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="6" class="text-secondary">Выполненные заявки не найдены.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+{{ status_chart|json_script:"application-status-chart-data" }}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const statusChartData = JSON.parse(document.getElementById("application-status-chart-data").textContent);
+  const statusChartCanvas = document.getElementById("applicationsStatusChart");
+
+  if (statusChartCanvas) {
+    new Chart(statusChartCanvas, {
+      type: "doughnut",
+      data: {
+        labels: statusChartData.labels,
+        datasets: [{
+          data: statusChartData.counts,
+          backgroundColor: statusChartData.colors,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: true,
+        plugins: {
+          legend: { position: "bottom" },
+        },
+      },
+    });
+  }
+</script>
 {% endblock %}

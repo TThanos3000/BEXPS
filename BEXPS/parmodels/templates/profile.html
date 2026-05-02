@@ -2,7 +2,10 @@
 {% block title %}Профиль{% endblock %}
 
 {% block content %}
-<h1 class="h3 mb-3">Профиль</h1>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h3 mb-0">Профиль</h1>
+  <a class="btn btn-outline-primary" href="{% url 'parmodels:profile_edit' %}">Редактировать</a>
+</div>
 
 <div class="card mb-3">
   <div class="card-body">

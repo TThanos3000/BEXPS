@@ -1,6 +1,7 @@
 import uuid
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 
@@ -177,6 +178,15 @@ class OrganizationInvitation(models.Model):
         choices=OrganizationMembership.Role.choices,
         default=OrganizationMembership.Role.ENGINEER,
     )
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="invitations",
+    )
+    position = models.CharField(max_length=255, blank=True)
+    date_reception = models.DateField(null=True, blank=True)
     token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
     status = models.CharField(
         max_length=16,
@@ -237,16 +247,24 @@ class ApplicationStatus(models.Model):
     code = models.CharField(max_length=64, unique=True)
     name = models.CharField(max_length=128)
     description = models.TextField(blank=True)
+    color_code = models.CharField(max_length=7, default="#6c757d")
     is_active = models.BooleanField(default=True)
+    is_system = models.BooleanField(default=False)
 
     def __str__(self) -> str:
         return self.name
+
+    def delete(self, *args, **kwargs):
+        if self.is_system:
+            raise ValidationError("Системный статус нельзя удалить.")
+        return super().delete(*args, **kwargs)
 
 
 class ApplicationPriority(models.Model):
     code = models.CharField(max_length=64, unique=True)
     name = models.CharField(max_length=128)
     description = models.TextField(blank=True)
+    color_code = models.CharField(max_length=7, default="#6c757d")
     weight = models.PositiveSmallIntegerField(default=0)
     is_active = models.BooleanField(default=True)
 
@@ -482,4 +500,3 @@ class History_Equipment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.equipment} / {self.performed_at}"
-

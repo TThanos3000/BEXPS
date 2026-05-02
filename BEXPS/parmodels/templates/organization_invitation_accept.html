@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Принять приглашение{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-12 col-lg-7">
+    <div class="card">
+      <div class="card-body p-4">
+        <h1 class="h4 mb-2">Приглашение в организацию</h1>
+        <div class="text-secondary mb-4">
+          {{ invitation.organization.name }} · {{ invitation.email }}
+        </div>
+
+        {% if existing_user %}
+          <p>Пользователь с этим email уже существует. Подтвердите присоединение к организации.</p>
+          <form method="post">
+            {% csrf_token %}
+            <button class="btn btn-primary" type="submit">Принять приглашение</button>
+            <a class="btn btn-outline-secondary" href="{% url 'parmodels:login' %}">Войти</a>
+          </form>
+        {% else %}
+          <form method="post" class="vstack gap-3">
+            {% csrf_token %}
+            {% if form.non_field_errors %}
+              <div class="alert alert-danger">{{ form.non_field_errors }}</div>
+            {% endif %}
+            <div>
+              <label class="form-label">Электронная почта</label>
+              <input class="form-control" value="{{ invitation.email }}" readonly>
+            </div>
+            {% for field in form %}
+              <div>
+                <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+                {{ field }}
+                {% if field.help_text %}
+                  <div class="form-text">{{ field.help_text }}</div>
+                {% endif %}
+                {% for error in field.errors %}
+                  <div class="text-danger small">{{ error }}</div>
+                {% endfor %}
+              </div>
+            {% endfor %}
+            <div>
+              <button class="btn btn-primary" type="submit">Создать аккаунт и принять</button>
+            </div>
+          </form>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

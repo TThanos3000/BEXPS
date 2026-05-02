@@ -5,9 +5,13 @@
 <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
   <div>
     <h1 class="h3 mb-1">Пользователи</h1>
-    <div class="text-secondary">Учетные записи и членство в организациях</div>
+    <div class="text-secondary">
+      Учетные записи и членство в организации{% if current_organization %}: {{ current_organization.name }}{% endif %}
+    </div>
   </div>
-  <a class="btn btn-primary" href="/admin/auth/user/add/">Добавить</a>
+  {% if can_invite_users %}
+    <a class="btn btn-primary" href="{% url 'parmodels:organization_invitation_create' %}">Пригласить сотрудника</a>
+  {% endif %}
 </div>
 
 <form method="get" class="row g-2 mb-3">
@@ -18,6 +22,63 @@
     <button class="btn btn-outline-primary" type="submit">Найти</button>
   </div>
 </form>
+
+<div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+  <button class="btn btn-outline-primary" type="button" data-bs-toggle="modal" data-bs-target="#usersFiltersModal">
+    Фильтры
+  </button>
+  <a class="btn btn-outline-secondary" href="{% url 'parmodels:users_list' %}">Сбросить</a>
+</div>
+
+<div class="modal fade" id="usersFiltersModal" tabindex="-1" aria-labelledby="usersFiltersModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <form method="get">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="usersFiltersModalLabel">Фильтры пользователей</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="q" value="{{ q }}">
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label small text-secondary" for="organizationFilter">Организация</label>
+              <select class="form-select" id="organizationFilter" name="organization">
+                <option value="">Все организации</option>
+                {% for organization in organizations %}
+                  <option value="{{ organization.id }}" {% if filters.organization == organization.id|stringformat:"s" %}selected{% endif %}>{{ organization.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label small text-secondary" for="departmentFilter">Департамент</label>
+              <select class="form-select" id="departmentFilter" name="department">
+                <option value="">Все департаменты</option>
+                {% for department in departments %}
+                  <option value="{{ department.id }}" {% if filters.department == department.id|stringformat:"s" %}selected{% endif %}>
+                    {{ department.name }}{% if department.organization %} · {{ department.organization.name }}{% endif %}
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label small text-secondary" for="dateReceptionFrom">Дата выхода от</label>
+              <input class="form-control" id="dateReceptionFrom" type="date" name="date_reception_from" value="{{ filters.date_reception_from }}">
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label small text-secondary" for="dateReceptionTo">Дата выхода до</label>
+              <input class="form-control" id="dateReceptionTo" type="date" name="date_reception_to" value="{{ filters.date_reception_to }}">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <a class="btn btn-outline-secondary" href="{% url 'parmodels:users_list' %}">Сбросить</a>
+          <button class="btn btn-primary" type="submit">Применить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
 
 <div class="card">
   <div class="card-body">
@@ -34,30 +95,36 @@
             <th>Роль</th>
             <th>Должность</th>
             <th>Дата выхода</th>
-            <th class="text-end">Действие</th>
           </tr>
         </thead>
         <tbody>
-          {% for user in users %}
-            {% with membership=user.organization_memberships.all.0 %}
+          {% for membership in memberships %}
+            {% with user=membership.user %}
               <tr>
-                <td>{{ user.first_name|default:"—" }}</td>
-                <td>{{ user.last_name|default:"—" }}</td>
+                <td>
+                  <a class="text-decoration-none" href="{% url 'parmodels:user_detail' user.id %}">
+                    {% if user.first_name %}{{ user.first_name }}{% elif user.email %}{{ user.email }}{% else %}{{ user.username }}{% endif %}
+                  </a>
+                </td>
+                <td>
+                  {% if user.last_name %}
+                    <a class="text-decoration-none" href="{% url 'parmodels:user_detail' user.id %}">{{ user.last_name }}</a>
+                  {% else %}
+                    <span class="text-secondary">—</span>
+                  {% endif %}
+                </td>
                 <td>{{ user.email|default:user.username }}</td>
                 <td>{{ user.phone|default:"—" }}</td>
                 <td>{{ membership.organization.name|default:"—" }}</td>
                 <td>{{ membership.department.name|default:"—" }}</td>
                 <td>{{ membership.role|default:"—" }}</td>
                 <td>{{ membership.position|default:"—" }}</td>
-                <td>{{ membership.date_reception|default:"—" }}</td>
-                <td class="text-end">
-                  <a class="btn btn-sm btn-outline-primary" href="{% url 'parmodels:user_detail' user.id %}">Подробнее</a>
-                </td>
+                <td class="text-secondary small">{{ membership.date_reception|default:"Не указана" }}</td>
               </tr>
             {% endwith %}
           {% empty %}
             <tr>
-              <td colspan="10" class="text-secondary">Пользователи не найдены.</td>
+              <td colspan="9" class="text-secondary">Пользователи не найдены.</td>
             </tr>
           {% endfor %}
         </tbody>

@@ -7,12 +7,9 @@
     <h2 class="mb-0">
       {{ title|default:"Локация" }}
     </h2>
-    {% if building %}
-      <div class="text-muted">{{ building.name }}</div>
-    {% endif %}
   </div>
-  {% if building %}
-    <a class="btn btn-outline-secondary" href="{% url 'parmodels:building_detail' building.id %}">Назад</a>
+  {% if cancel_url_arg %}
+    <a class="btn btn-outline-secondary" href="{% url cancel_url cancel_url_arg %}">Назад</a>
   {% else %}
     <a class="btn btn-outline-secondary" href="{% url cancel_url %}">Назад</a>
   {% endif %}
