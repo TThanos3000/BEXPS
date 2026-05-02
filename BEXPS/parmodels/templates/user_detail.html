@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}{{ user_obj.get_full_name|default:user_obj.username }}{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+  <a class="text-secondary text-decoration-none" href="{% url 'parmodels:users_list' %}">← назад к пользователям</a>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h1 class="h4 mb-3">{{ user_obj.get_full_name|default:user_obj.username }}</h1>
+    <dl class="row mb-0">
+      <dt class="col-sm-3">Имя</dt>
+      <dd class="col-sm-9">{{ user_obj.first_name|default:"—" }}</dd>
+      <dt class="col-sm-3">Фамилия</dt>
+      <dd class="col-sm-9">{{ user_obj.last_name|default:"—" }}</dd>
+      <dt class="col-sm-3">Email</dt>
+      <dd class="col-sm-9">{{ user_obj.email|default:"—" }}</dd>
+      <dt class="col-sm-3">Телефон</dt>
+      <dd class="col-sm-9">{{ user_obj.phone|default:"—" }}</dd>
+      <dt class="col-sm-3">Активность</dt>
+      <dd class="col-sm-9">{% if user_obj.is_active %}Активен{% else %}Отключен{% endif %}</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Членство в организациях</h2>
+    {% if user_obj.organization_memberships.all %}
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Организация</th>
+              <th>Департамент</th>
+              <th>Роль</th>
+              <th>Должность</th>
+              <th>Дата выхода</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for membership in user_obj.organization_memberships.all %}
+              <tr>
+                <td>{{ membership.organization.name|default:"—" }}</td>
+                <td>{{ membership.department.name|default:"—" }}</td>
+                <td>{{ membership.role }}</td>
+                <td>{{ membership.position|default:"—" }}</td>
+                <td>{{ membership.date_reception|default:"—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-secondary">Членства в организациях нет.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

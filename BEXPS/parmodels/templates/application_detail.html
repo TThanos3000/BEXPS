@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}{{ application.name_application }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-3">
+  <a class="text-secondary text-decoration-none" href="{% url 'parmodels:applications_list' %}">← назад к заявкам</a>
+  <a class="btn btn-outline-danger" href="{% url 'parmodels:application_delete_confirm' application.id %}">Удалить</a>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h1 class="h4 mb-3">{{ application.name_application }}</h1>
+    <dl class="row mb-0">
+      <dt class="col-sm-3">Статус</dt>
+      <dd class="col-sm-9">{{ application.status.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Приоритет</dt>
+      <dd class="col-sm-9">{{ application.priority.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Организация</dt>
+      <dd class="col-sm-9">{{ application.organization.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Локация</dt>
+      <dd class="col-sm-9">{{ application.location.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Оборудование</dt>
+      <dd class="col-sm-9">{{ application.equipment.name_equipment|default:"—" }}</dd>
+      <dt class="col-sm-3">Создатель</dt>
+      <dd class="col-sm-9">{{ application.creator.get_full_name|default:application.creator.email|default:"—" }}</dd>
+      <dt class="col-sm-3">Исполнитель</dt>
+      <dd class="col-sm-9">{{ application.executor.get_full_name|default:application.executor.email|default:"—" }}</dd>
+      <dt class="col-sm-3">Дата создания</dt>
+      <dd class="col-sm-9">{{ application.created_at|default:application.date_create }}</dd>
+      <dt class="col-sm-3">Дедлайн</dt>
+      <dd class="col-sm-9">{{ application.deadline|default:"—" }}</dd>
+      <dt class="col-sm-3">Описание</dt>
+      <dd class="col-sm-9">{{ application.about|default:"—" }}</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6 mb-3">Изменить статус</h2>
+        <form method="post" action="{% url 'parmodels:application_status_update' application.id %}">
+          {% csrf_token %}
+          {% for field in status_form %}
+            <div class="mb-3">
+              <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% for error in field.errors %}
+                <div class="text-danger small mt-1">{{ error }}</div>
+              {% endfor %}
+            </div>
+          {% endfor %}
+          <button class="btn btn-primary" type="submit">Сохранить статус</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6 mb-3">История заявки</h2>
+        {% if history %}
+          <div class="table-responsive">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Пользователь</th>
+                  <th>Старый статус</th>
+                  <th>Новый статус</th>
+                  <th>Комментарий</th>
+                  <th>Файл</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in history %}
+                  <tr>
+                    <td class="text-secondary small">{{ item.changed_at }}</td>
+                    <td>{{ item.user.get_full_name|default:item.user.email|default:item.user.username|default:"—" }}</td>
+                    <td>{{ item.status_old.name|default:"—" }}</td>
+                    <td>{{ item.status_new.name|default:"—" }}</td>
+                    <td>{{ item.comment|default:"—" }}</td>
+                    <td>
+                      {% if item.file and item.file.file_path %}
+                        <a href="{{ item.file.file_path.url }}">{{ item.file.file_name }}</a>
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="text-secondary">Истории изменений пока нет.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

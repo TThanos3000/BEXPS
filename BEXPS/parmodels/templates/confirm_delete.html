@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Подтверждение удаления{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <h1 class="h4 mb-3">Удалить {{ object_type }}?</h1>
+    <p class="mb-2">Объект: <strong>{{ object_name }}</strong></p>
+    {% if extra_warning %}
+      <div class="alert alert-warning">{{ extra_warning }}</div>
+    {% endif %}
+    <p class="text-secondary">Удаление будет выполнено только после отправки формы.</p>
+
+    <div class="d-flex gap-2">
+      <form method="post" action="{% url delete_url object_id %}">
+        {% csrf_token %}
+        <button class="btn btn-danger" type="submit">Удалить</button>
+      </form>
+      <a class="btn btn-outline-secondary" href="{% url cancel_url object_id %}">Отмена</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

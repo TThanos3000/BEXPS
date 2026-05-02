@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Локации{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
+  <div>
+    <h1 class="h3 mb-1">Локации</h1>
+    <div class="text-secondary">Иерархия объектов, этажей, помещений и зон</div>
+  </div>
+  <a class="btn btn-primary" href="{% url 'parmodels:location_create_standalone' %}">Добавить</a>
+</div>
+
+<form method="get" class="row g-2 mb-3">
+  <div class="col-12 col-md-9 col-lg-10">
+    <input class="form-control" type="search" name="q" value="{{ q }}" placeholder="Поиск по названию, описанию или типу">
+  </div>
+  <div class="col-12 col-md-3 col-lg-2 d-grid">
+    <button class="btn btn-outline-primary" type="submit">Найти</button>
+  </div>
+</form>
+
+<div class="card">
+  <div class="list-group list-group-flush">
+    {% for node in location_nodes %}
+      {% with loc=node.location %}
+        <div class="list-group-item {% if node.parent_id %}collapse location-parent-{{ node.parent_id }}{% endif %}">
+          <div class="d-flex flex-column flex-lg-row justify-content-between gap-2" style="padding-left: {{ node.level }}.25rem;">
+            <div class="d-flex gap-2 align-items-start">
+              {% if node.has_children %}
+                <button class="btn btn-sm btn-outline-secondary py-0"
+                        type="button"
+                        data-bs-toggle="collapse"
+                        data-bs-target=".location-parent-{{ loc.id }}"
+                        aria-expanded="false"
+                        aria-label="Раскрыть дочерние локации">
+                  +
+                </button>
+              {% else %}
+                <span class="d-inline-block" style="width: 2rem;"></span>
+              {% endif %}
+              <div>
+                <div class="fw-semibold">
+                  {{ loc.name }}
+                  <span class="badge {% if loc.equipment_count %}text-bg-primary{% else %}text-bg-secondary{% endif %} ms-1">
+                    {{ loc.equipment_count|default:0 }}
+                  </span>
+                </div>
+                <div class="text-secondary small">
+                  тип: {{ loc.location_type }}
+                  {% if loc.organization %} · организация: {{ loc.organization.name }}{% endif %}
+                  {% if loc.parent %} · родитель: {{ loc.parent.name }}{% endif %}
+                </div>
+              </div>
+            </div>
+            <div class="text-lg-end">
+              <a class="btn btn-sm btn-outline-primary" href="{% url 'parmodels:location_detail_standalone' loc.id %}">Подробнее</a>
+            </div>
+          </div>
+        </div>
+      {% endwith %}
+    {% empty %}
+      <div class="list-group-item text-secondary">Локации не найдены.</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

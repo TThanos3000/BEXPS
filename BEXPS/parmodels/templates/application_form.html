@@ -1,28 +1,19 @@
 {% extends "base.html" %}
-{% block title %}{{ title|default:"Локация" }}{% endblock %}
-{% block content %}
+{% block title %}{{ title }}{% endblock %}
 
+{% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <div>
-    <h2 class="mb-0">
-      {{ title|default:"Локация" }}
-    </h2>
-    {% if building %}
-      <div class="text-muted">{{ building.name }}</div>
-    {% endif %}
+    <h1 class="h3 mb-1">{{ title }}</h1>
+    <div class="text-secondary">Создание заявки с привязкой к локации, оборудованию и справочникам</div>
   </div>
-  {% if building %}
-    <a class="btn btn-outline-secondary" href="{% url 'parmodels:building_detail' building.id %}">Назад</a>
-  {% else %}
-    <a class="btn btn-outline-secondary" href="{% url cancel_url %}">Назад</a>
-  {% endif %}
+  <a class="btn btn-outline-secondary" href="{% url cancel_url %}">Назад</a>
 </div>
 
 <div class="card">
   <div class="card-body">
-    <form method="post">
+    <form method="post" novalidate>
       {% csrf_token %}
-
       {% if form.non_field_errors %}
         <div class="alert alert-danger">{{ form.non_field_errors }}</div>
       {% endif %}
@@ -35,16 +26,13 @@
             <div class="form-text">{{ field.help_text }}</div>
           {% endif %}
           {% for error in field.errors %}
-            <div class="text-danger small">{{ error }}</div>
+            <div class="text-danger small mt-1">{{ error }}</div>
           {% endfor %}
         </div>
       {% endfor %}
 
-      <button class="btn btn-primary" type="submit">
-        {% if mode == "create" %}Создать{% else %}Сохранить{% endif %}
-      </button>
+      <button class="btn btn-primary" type="submit">Создать</button>
     </form>
   </div>
 </div>
-
 {% endblock %}

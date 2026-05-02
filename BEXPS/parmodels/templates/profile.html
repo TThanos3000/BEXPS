@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Профиль{% endblock %}
+
+{% block content %}
+<h1 class="h3 mb-3">Профиль</h1>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <dl class="row mb-0">
+      <dt class="col-sm-3">Имя</dt>
+      <dd class="col-sm-9">{{ request.user.first_name|default:"—" }}</dd>
+      <dt class="col-sm-3">Фамилия</dt>
+      <dd class="col-sm-9">{{ request.user.last_name|default:"—" }}</dd>
+      <dt class="col-sm-3">Email</dt>
+      <dd class="col-sm-9">{{ request.user.email|default:"—" }}</dd>
+      <dt class="col-sm-3">Телефон</dt>
+      <dd class="col-sm-9">{{ request.user.phone|default:"—" }}</dd>
+      <dt class="col-sm-3">Активность</dt>
+      <dd class="col-sm-9">{% if request.user.is_active %}Активен{% else %}Отключен{% endif %}</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Организации и роли</h2>
+    {% if memberships %}
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Организация</th>
+              <th>Роль</th>
+              <th>Департамент</th>
+              <th>Должность</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for membership in memberships %}
+              <tr>
+                <td>{{ membership.organization.name|default:"—" }}</td>
+                <td>{{ membership.role }}</td>
+                <td>{{ membership.department.name|default:"—" }}</td>
+                <td>{{ membership.position|default:"—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-secondary">Вы пока не состоите в организациях.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

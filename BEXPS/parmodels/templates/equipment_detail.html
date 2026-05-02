@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}{{ equipment.name_equipment }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-3">
+  <a class="text-secondary text-decoration-none" href="{% url 'parmodels:equipment_list' %}">← назад к оборудованию</a>
+  <a class="btn btn-outline-danger" href="{% url 'parmodels:equipment_delete_confirm' equipment.id %}">Удалить</a>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h1 class="h4 mb-3">{{ equipment.name_equipment }}</h1>
+    <dl class="row mb-0">
+      <dt class="col-sm-3">Инвентарный номер</dt>
+      <dd class="col-sm-9">{{ equipment.inventory_number|default:"—" }}</dd>
+      <dt class="col-sm-3">External ID</dt>
+      <dd class="col-sm-9">{{ equipment.external_id|default:"—" }}</dd>
+      <dt class="col-sm-3">Статус</dt>
+      <dd class="col-sm-9">{{ equipment.status.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Тип</dt>
+      <dd class="col-sm-9">{{ equipment.type_equipment.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Локация</dt>
+      <dd class="col-sm-9">{{ equipment.location.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Организация</dt>
+      <dd class="col-sm-9">{{ equipment.organization.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Дата ввода</dt>
+      <dd class="col-sm-9">{{ equipment.date_input|default:"—" }}</dd>
+      <dt class="col-sm-3">Описание</dt>
+      <dd class="col-sm-9">{{ equipment.about|default:"—" }}</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6 mb-3">Изменить статус</h2>
+        <form method="post" action="{% url 'parmodels:equipment_status_update' equipment.id %}">
+          {% csrf_token %}
+          {% for field in status_form %}
+            <div class="mb-3">
+              <label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+              {{ field }}
+              {% for error in field.errors %}
+                <div class="text-danger small mt-1">{{ error }}</div>
+              {% endfor %}
+            </div>
+          {% endfor %}
+          <button class="btn btn-primary" type="submit">Сохранить статус</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-8">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6 mb-3">История оборудования</h2>
+        {% if history %}
+          <div class="table-responsive">
+            <table class="table align-middle">
+              <thead>
+                <tr>
+                  <th>Дата</th>
+                  <th>Пользователь</th>
+                  <th>Тип обслуживания</th>
+                  <th>Описание</th>
+                  <th>Результат</th>
+                  <th>Заявка</th>
+                  <th>Файл</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for item in history %}
+                  <tr>
+                    <td class="text-secondary small">{{ item.performed_at|default:"—" }}</td>
+                    <td>{{ item.user.get_full_name|default:item.user.email|default:item.user.username|default:"—" }}</td>
+                    <td>{{ item.maintenance_type|default:"—" }}</td>
+                    <td>{{ item.description|default:"—" }}</td>
+                    <td>{{ item.result|default:"—" }}</td>
+                    <td>
+                      {% if item.application %}
+                        <a href="{% url 'parmodels:application_detail' item.application.id %}">{{ item.application.name_application }}</a>
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
+                    <td>
+                      {% if item.file and item.file.file_path %}
+                        <a href="{{ item.file.file_path.url }}">{{ item.file.file_name }}</a>
+                      {% else %}
+                        —
+                      {% endif %}
+                    </td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="text-secondary">Истории обслуживания пока нет.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

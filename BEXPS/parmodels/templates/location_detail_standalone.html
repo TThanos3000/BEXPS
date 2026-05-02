@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{{ location.name }}{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-3 mb-3">
+  <a class="text-secondary text-decoration-none" href="{% url 'parmodels:locations_list' %}">← назад к локациям</a>
+  <div class="d-flex gap-2">
+    <a class="btn btn-primary" href="{% url 'parmodels:location_model_create' location.id %}">Добавить техплан</a>
+    <a class="btn btn-outline-danger" href="{% url 'parmodels:location_delete_confirm' location.id %}">Удалить</a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h1 class="h4 mb-3">{{ location.name }}</h1>
+    <dl class="row mb-0">
+      <dt class="col-sm-3">Тип</dt>
+      <dd class="col-sm-9">{{ location.location_type }}</dd>
+      <dt class="col-sm-3">Организация</dt>
+      <dd class="col-sm-9">{{ location.organization.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Родитель</dt>
+      <dd class="col-sm-9">{{ location.parent.name|default:"—" }}</dd>
+      <dt class="col-sm-3">Адрес</dt>
+      <dd class="col-sm-9">{{ location.address_location|default:"—" }}</dd>
+      <dt class="col-sm-3">Описание</dt>
+      <dd class="col-sm-9">{{ location.description|default:"—" }}</dd>
+    </dl>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Техпланы</h2>
+    {% if location_models %}
+      <div class="list-group list-group-flush">
+        {% for model in location_models %}
+          <div class="list-group-item px-0 d-flex justify-content-between">
+            <span class="fw-semibold">{{ model.name }}</span>
+            <span class="text-secondary small">{{ model.created_at }}</span>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-secondary">Техпланы пока не добавлены.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Оборудование в локации</h2>
+    {% if equipment %}
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Название</th>
+              <th>Инвентарный номер</th>
+              <th>Статус</th>
+              <th>Тип</th>
+              <th>Дата ввода</th>
+              <th class="text-end">Действие</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in equipment %}
+              <tr>
+                <td class="fw-semibold">{{ item.name_equipment }}</td>
+                <td>{{ item.inventory_number|default:"—" }}</td>
+                <td>{{ item.status.name|default:"—" }}</td>
+                <td>{{ item.type_equipment.name|default:"—" }}</td>
+                <td class="text-secondary small">{{ item.date_input|default:"—" }}</td>
+                <td class="text-end">
+                  <a class="btn btn-sm btn-outline-primary" href="{% url 'parmodels:equipment_detail' item.id %}">Подробнее</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-secondary">Оборудование в этой локации пока не добавлено.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Дочерние локации</h2>
+    {% if children %}
+      <div class="list-group list-group-flush">
+        {% for child in children %}
+          <a class="list-group-item list-group-item-action" href="{% url 'parmodels:location_detail_standalone' child.id %}">
+            {{ child.name }} <span class="text-secondary small">· {{ child.location_type }}</span>
+          </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="text-secondary">Дочерних локаций нет.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
