@@ -10,22 +10,22 @@
   <div class="col-12 col-lg-7">
     <div class="card">
       <div class="card-body">
-        <h1 class="h5 mb-1">Загрузка IFC модели</h1>
+        <h1 class="h5 mb-1">Загрузка IFC файла</h1>
         <div class="text-secondary mb-3">
-          здание: {{ building.name }} · локация: {{ location.name }}
+          объект: {{ building.name }} · локация: {{ location.name }}
         </div>
 
         <form method="post" enctype="multipart/form-data" class="vstack gap-3">
           {% csrf_token %}
 
           <div>
-            <label class="form-label">Название модели</label>
-            {{ form.model_name }}
+            <label class="form-label">Название файла</label>
+            {{ form.file_name }}
           </div>
 
           <div>
             <label class="form-label">IFC файл</label>
-            {{ form.ifc_file }}
+            {{ form.file_path }}
             <div class="form-text">Поддерживается .ifc</div>
           </div>
 

@@ -6,7 +6,7 @@
   <div>
     <a class="text-secondary text-decoration-none" href="{% url 'parmodels:building_list' %}">← назад</a>
     <h1 class="h4 mt-2 mb-1">{{ building.name }}</h1>
-    <div class="text-secondary">адрес: {{ building.address }}</div>
+    <div class="text-secondary">адрес: {{ building.address_location }}</div>
     <div class="text-secondary">{{ building.description }}</div>
   </div>
   <a class="btn btn-outline-secondary" href="/admin/parmodels/location/" target="_blank">Локации в админке</a>

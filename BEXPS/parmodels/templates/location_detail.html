@@ -4,16 +4,16 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-start mb-3">
   <div>
-    <a class="text-secondary text-decoration-none" href="{% url 'parmodels:building_detail' building.id %}">← назад к зданию</a>
+    <a class="text-secondary text-decoration-none" href="{% url 'parmodels:building_detail' building.id %}">← назад к объекту</a>
     <h1 class="h4 mt-2 mb-1">{{ location.name }}</h1>
     <div class="text-secondary">
-      здание: {{ building.name }} · тип: {{ location.location_type }}
+      объект: {{ building.name }} · тип: {{ location.location_type }}
     </div>
   </div>
 
   <a class="btn btn-primary"
      href="{% url 'parmodels:ifc_model_upload' building.id location.id %}">
-    Загрузить IFC модель
+    Загрузить IFC файл
   </a>
   <a class="btn btn-outline-primary"
     href="{% url 'parmodels:location_edit' building.id location.id %}">
@@ -25,9 +25,9 @@
   </a>
 </div>
 
-<div class="card">
+<div class="card mb-3">
   <div class="card-body">
-    <h2 class="h6 mb-3">Модели в этой локации</h2>
+    <h2 class="h6 mb-3">3D JSON модели в этой локации</h2>
 
     {% if models %}
       <div class="table-responsive">
@@ -35,44 +35,23 @@
           <thead>
             <tr>
               <th>Название</th>
-              <th>Статус</th>
               <th>Дата</th>
-              <th>Файл</th>
               <th class="text-end">Действия</th>
             </tr>
           </thead>
           <tbody>
             {% for m in models %}
               <tr>
-                <td class="fw-semibold">{{ m.model_name }}</td>
-                <td><span class="badge text-bg-light">{{ m.status }}</span></td>
-                <td class="text-secondary small">{{ m.uploaded_at }}</td>
-                <td>
-                  {% if m.ifc_file %}
-                    <a href="{{ m.ifc_file.url }}">{{ m.ifc_file.name|cut:"ifc/" }}</a>
-                  {% else %}
-                    <span class="text-secondary small">нет файла</span>
-                  {% endif %}
-                </td>
+                <td class="fw-semibold">{{ m.name }}</td>
+                <td class="text-secondary small">{{ m.created_at }}</td>
                 <td class="text-end">
                   <form method="post"
                         action="{% url 'parmodels:ifc_model_delete' building.id location.id m.id %}"
-                        onsubmit="return confirm('Удалить модель и файл?');"
+                        onsubmit="return confirm('Удалить JSON модель?');"
                         class="d-inline">
                     {% csrf_token %}
                     <button type="submit" class="btn btn-sm btn-outline-danger">Удалить</button>
                   </form>
-                </td>
-                <td>
-                  <button
-                    class="btn btn-primary btn-sm"
-                    type="button"
-                    onclick="parseAndSendIfc({{ building.id }}, {{ location.id }}, {{ m.id }}, '{{ m.ifc_file.url }}')"
-                  >
-                    Извлечь данные из IFC
-                  </button>
-
-                  <span id="parse-status-{{ m.id }}" class="ms-2 text-muted"></span>
                 </td>
               </tr>
             {% endfor %}
@@ -80,7 +59,60 @@
         </table>
       </div>
     {% else %}
-      <div class="text-secondary">Пока нет загруженных моделей</div>
+      <div class="text-secondary">Пока нет сохраненных JSON моделей</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Загруженные IFC файлы</h2>
+
+    {% if files %}
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              <th>Файл</th>
+              <th>Тип</th>
+              <th>Размер</th>
+              <th>Дата</th>
+              <th>Действия</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in files %}
+              <tr>
+                <td class="fw-semibold">
+                  {% if f.file_path %}
+                    <a href="{{ f.file_path.url }}">{{ f.file_name }}</a>
+                  {% else %}
+                    {{ f.file_name }}
+                  {% endif %}
+                </td>
+                <td><span class="badge text-bg-light">{{ f.file_type }}</span></td>
+                <td class="text-secondary small">{{ f.file_size|default:"" }}</td>
+                <td class="text-secondary small">{{ f.created_at }}</td>
+                <td>
+                  {% if f.file_path %}
+                    <button
+                      class="btn btn-primary btn-sm"
+                      type="button"
+                      onclick="parseAndSendIfc({{ building.id }}, {{ location.id }}, {{ f.id }}, '{{ f.file_path.url }}')"
+                    >
+                      Сохранить JSON модели
+                    </button>
+
+                    <span id="parse-status-{{ f.id }}" class="ms-2 text-muted"></span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="text-secondary">Пока нет загруженных IFC файлов</div>
     {% endif %}
   </div>
 </div>
@@ -91,8 +123,7 @@
     IFCWALL,
     IFCSLAB,
     IFCDOOR,
-    IFCWINDOW,
-    IFCRELDEFINESBYPROPERTIES
+    IFCWINDOW
   } from "https://unpkg.com/web-ifc@0.0.51/web-ifc-api.js";
 
   const IFC_TYPE_LABELS_RU = {
@@ -154,8 +185,8 @@
     return json;
   }
 
-  window.parseAndSendIfc = async function(buildingId, locationId, ifcId, fileUrl) {
-    const statusEl = document.getElementById(`parse-status-${ifcId}`);
+  window.parseAndSendIfc = async function(buildingId, locationId, fileId, fileUrl) {
+    const statusEl = document.getElementById(`parse-status-${fileId}`);
     const setStatus = (text) => { if (statusEl) statusEl.textContent = text; };
 
     try {
@@ -164,11 +195,10 @@
       const fileName = (fileUrl.split("/").pop() || "model.ifc");
       const json = await parseIfcFromUrl(fileUrl, fileName);
 
-      setStatus("Отправляю JSON на сервер...");
+      setStatus("Сохраняю JSON...");
 
       const csrf = getCookie("csrftoken");
-
-      const ingestUrl = `/buildings/${buildingId}/locations/${locationId}/ifc/${ifcId}/ingest/`;
+      const ingestUrl = `/buildings/${buildingId}/locations/${locationId}/ifc/${fileId}/ingest/`;
 
       const r = await fetch(ingestUrl, {
         method: "POST",
@@ -185,7 +215,7 @@
       }
 
       const data = await r.json();
-      setStatus(`Готово. Создано элементов: ${data.created}`);
+      setStatus(`Готово. Сохранено JSON моделей: ${data.created}`);
 
     } catch (e) {
       console.error(e);

@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Здания{% endblock %}
+{% block title %}Объекты{% endblock %}
 
 {% block content %}
 <div class="d-flex align-items-end justify-content-between mb-3">
   <div>
-    <h1 class="h4 mb-1">Здания</h1>
-    <div class="text-secondary">Выбери здание, чтобы увидеть локации и модели</div>
+    <h1 class="h4 mb-1">Объекты</h1>
+    <div class="text-secondary">Выбери объект, чтобы увидеть локации и модели</div>
   </div>
-  <a class="btn btn-outline-secondary" href="/admin/parmodels/building/" target="_blank">Открыть админку</a>
+  <a class="btn btn-outline-secondary" href="/admin/parmodels/location/" target="_blank">Открыть админку</a>
 </div>
 
 {% if buildings %}
@@ -21,7 +21,7 @@
                 <div class="fw-semibold">
                   <a class="text-decoration-none" href="{% url 'parmodels:building_detail' b.id %}">{{ b.name }}</a>
                 </div>
-                <div class="text-secondary small mt-1">{{ b.address }}</div>
+                <div class="text-secondary small mt-1">{{ b.address_location }}</div>
               </div>
               <span class="badge text-bg-light">id {{ b.id }}</span>
             </div>
@@ -36,7 +36,7 @@
 {% else %}
   <div class="card">
     <div class="card-body text-secondary">
-      Пока нет зданий. Добавь в админке: /admin
+      Пока нет объектов. Добавь в админке локацию с типом building.
     </div>
   </div>
 {% endif %}
