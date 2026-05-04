@@ -424,10 +424,16 @@ class OrganizationInvitationForm(forms.ModelForm):
         }
 
     def __init__(self, *args, **kwargs):
-        organization = kwargs.pop("organization")
+        self.organization = kwargs.pop("organization")
         super().__init__(*args, **kwargs)
         self.fields["department"].required = False
-        self.fields["department"].queryset = Department.objects.filter(organization=organization).order_by("name")
+        self.fields["department"].queryset = Department.objects.filter(organization=self.organization).order_by("name")
+
+    def clean_department(self):
+        department = self.cleaned_data.get("department")
+        if department and department.organization_id != self.organization.id:
+            raise ValidationError("Департамент должен принадлежать текущей организации.")
+        return department
 
 
 class InvitationRegistrationForm(UserCreationForm):

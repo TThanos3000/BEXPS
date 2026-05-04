@@ -19,7 +19,9 @@
 
 <nav class="navbar navbar-expand-lg bg-white">
   <div class="container">
-    <a class="navbar-brand fw-semibold" href="{% url 'parmodels:dashboard' %}">BEXPS</a>
+    <a class="navbar-brand fw-semibold" href="{% url 'parmodels:dashboard' %}">
+      {{ current_organization.name|default:"BEXPS" }}
+    </a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar"
             aria-controls="mainNavbar" aria-expanded="false" aria-label="Переключить навигацию">
       <span class="navbar-toggler-icon"></span>
@@ -41,7 +43,7 @@
               <a class="nav-link {% if url_name == 'users_list' or url_name == 'user_detail' or url_name == 'organization_invitation_create' %}active fw-semibold{% endif %}" href="{% url 'parmodels:users_list' %}">Пользователи</a>
             </li>
             <li class="nav-item">
-              <a class="nav-link {% if url_name == 'profile' or url_name == 'profile_edit' %}active fw-semibold{% endif %}" href="{% url 'parmodels:profile' %}">Профиль</a>
+              <a class="nav-link {% if url_name == 'profile' or url_name == 'profile_edit' or url_name == 'profile_switch_organization' %}active fw-semibold{% endif %}" href="{% url 'parmodels:profile' %}">Профиль</a>
             </li>
             <li class="nav-item">
               <form method="post" action="{% url 'parmodels:logout' %}" class="m-0">

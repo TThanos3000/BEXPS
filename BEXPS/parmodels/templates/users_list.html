@@ -80,6 +80,14 @@
   </div>
 </div>
 
+{% if filter_errors %}
+  <div class="alert alert-warning">
+    {% for error in filter_errors %}
+      <div>{{ error }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
 <div class="card">
   <div class="card-body">
     <div class="table-responsive">

@@ -7,7 +7,9 @@
     <h1 class="h3 mb-1">Локации</h1>
     <div class="text-secondary">Иерархия объектов, этажей, помещений и зон</div>
   </div>
-  <a class="btn btn-primary" href="{% url 'parmodels:location_create_standalone' %}">Добавить</a>
+  {% if can_create_location %}
+    <a class="btn btn-primary" href="{% url 'parmodels:location_create_standalone' %}">Добавить</a>
+  {% endif %}
 </div>
 
 <form method="get" class="row g-2 mb-3">

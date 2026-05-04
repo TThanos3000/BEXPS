@@ -38,5 +38,6 @@ urlpatterns = [
     path("invitations/<uuid:token>/", views.organization_invitation_accept, name="organization_invitation_accept"),
     path("profile/", views.profile, name="profile"),
     path("profile/edit/", views.profile_edit, name="profile_edit"),
+    path("profile/switch-organization/", views.profile_switch_organization, name="profile_switch_organization"),
     path("logout/", views.logout_view, name="logout"),
 ]

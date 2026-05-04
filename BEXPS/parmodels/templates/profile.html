@@ -24,6 +24,90 @@
   </div>
 </div>
 
+{% if show_organization_card and current_membership %}
+  {% with organization=current_membership.organization %}
+    <div class="card mb-3">
+      <div class="card-body">
+        <h2 class="h5 mb-3">Организация</h2>
+        <dl class="row mb-0">
+          <dt class="col-sm-3">Название</dt>
+          <dd class="col-sm-9">{{ organization.name|default:"—" }}</dd>
+          <dt class="col-sm-3">Юридическое название</dt>
+          <dd class="col-sm-9">{{ organization.legal_name|default:"—" }}</dd>
+          <dt class="col-sm-3">ИНН</dt>
+          <dd class="col-sm-9">{{ organization.inn|default:"—" }}</dd>
+          <dt class="col-sm-3">Описание</dt>
+          <dd class="col-sm-9">{{ organization.description|default:"—" }}</dd>
+          <dt class="col-sm-3">Статус</dt>
+          <dd class="col-sm-9">{{ organization.status|default:"—" }}</dd>
+          <dt class="col-sm-3">Ваша роль</dt>
+          <dd class="col-sm-9">{{ current_membership.role|default:"—" }}</dd>
+          <dt class="col-sm-3">Департамент</dt>
+          <dd class="col-sm-9">{{ current_membership.department.name|default:"—" }}</dd>
+          <dt class="col-sm-3">Должность</dt>
+          <dd class="col-sm-9">{{ current_membership.position|default:"—" }}</dd>
+        </dl>
+      </div>
+    </div>
+  {% endwith %}
+{% endif %}
+
+{% if active_memberships|length > 1 %}
+  <div class="card mb-3">
+    <div class="card-body">
+      <h2 class="h6 mb-3">Переключение организации</h2>
+      <div class="list-group list-group-flush">
+        {% for membership in active_memberships %}
+          <div class="list-group-item px-0 d-flex flex-column flex-lg-row justify-content-between gap-2">
+            <div>
+              <div class="fw-semibold">{{ membership.organization.name }}</div>
+              <div class="text-secondary small">
+                {{ membership.role }}{% if membership.department %} · {{ membership.department.name }}{% endif %}
+              </div>
+            </div>
+            {% if current_membership.organization_id == membership.organization_id %}
+              <span class="badge text-bg-primary align-self-lg-center">Текущая</span>
+            {% else %}
+              <button class="btn btn-outline-primary btn-sm align-self-lg-center"
+                      type="button"
+                      data-bs-toggle="modal"
+                      data-bs-target="#switchOrganizationModal{{ membership.organization_id }}">
+                Переключиться
+              </button>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {% for membership in active_memberships %}
+    {% if current_membership.organization_id != membership.organization_id %}
+      <div class="modal fade" id="switchOrganizationModal{{ membership.organization_id }}" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <form method="post" action="{% url 'parmodels:profile_switch_organization' %}">
+              {% csrf_token %}
+              <input type="hidden" name="organization_id" value="{{ membership.organization_id }}">
+              <div class="modal-header">
+                <h2 class="modal-title h5">Переключить организацию?</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+              </div>
+              <div class="modal-body">
+                Текущая организация будет изменена на «{{ membership.organization.name }}».
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="submit" class="btn btn-primary">Переключиться</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    {% endif %}
+  {% endfor %}
+{% endif %}
+
 <div class="card">
   <div class="card-body">
     <h2 class="h6 mb-3">Организации и роли</h2>

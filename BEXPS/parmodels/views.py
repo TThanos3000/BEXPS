@@ -5,10 +5,12 @@ from datetime import timedelta
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils.dateparse import parse_date
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
@@ -40,10 +42,11 @@ from .models import (
     OrganizationInvitation,
     OrganizationMembership,
 )
+from .permissions import permission_flags, require_permission
 from .services import (
+    CURRENT_ORGANIZATION_SESSION_KEY,
     get_current_membership,
     get_current_organization as service_get_current_organization,
-    user_is_org_admin,
 )
 
 STATUS_FALLBACK_LABELS = {
@@ -142,8 +145,8 @@ def _location_descendant_ids(location):
     return ids
 
 
-def _get_current_organization(user):
-    return service_get_current_organization(user)
+def _get_current_organization(request):
+    return service_get_current_organization(request.user, request=request)
 
 
 def _organization_access_denied(request):
@@ -151,7 +154,7 @@ def _organization_access_denied(request):
 
 
 def _require_current_organization(request):
-    organization = _get_current_organization(request.user)
+    organization = _get_current_organization(request)
     if organization is None:
         messages.error(
             request,
@@ -170,6 +173,12 @@ def _organization_users_queryset(organization):
         .distinct()
         .order_by("last_name", "first_name", "email", "username")
     )
+
+
+def _parse_filter_date(value):
+    if not value:
+        return None
+    return parse_date(value)
 
 
 def _status_display(status):
@@ -225,6 +234,7 @@ def dashboard(request):
 
     context = {
         "current_organization": organization,
+        **permission_flags(request.user, request=request),
         "applications_count": applications.count(),
         "active_applications_count": applications.exclude(
             status__code__in=completed_status_codes
@@ -247,6 +257,7 @@ def applications_list(request):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "applications.view", request=request)
     q = (request.GET.get("q") or "").strip()
     status_id = (request.GET.get("status") or "").strip()
     priority_id = (request.GET.get("priority") or "").strip()
@@ -255,6 +266,22 @@ def applications_list(request):
     date_create_to = (request.GET.get("date_create_to") or "").strip()
     deadline_from = (request.GET.get("deadline_from") or "").strip()
     deadline_to = (request.GET.get("deadline_to") or "").strip()
+    mine = (request.GET.get("mine") or "").strip() == "1"
+    filter_errors = []
+    date_create_from_date = _parse_filter_date(date_create_from)
+    date_create_to_date = _parse_filter_date(date_create_to)
+    deadline_from_date = _parse_filter_date(deadline_from)
+    deadline_to_date = _parse_filter_date(deadline_to)
+    invalid_deadline_range = bool(
+        deadline_from
+        and deadline_to
+        and deadline_from_date
+        and deadline_to_date
+        and deadline_from_date > deadline_to_date
+    )
+    if invalid_deadline_range:
+        filter_errors.append("Неверный диапазон дат")
+
     applications = (
         Application.objects
         .filter(organization=organization)
@@ -277,18 +304,37 @@ def applications_list(request):
         applications = applications.filter(priority_id=priority_id)
     if executor_id:
         applications = applications.filter(executor_id=executor_id)
-    if date_create_from:
-        applications = applications.filter(date_create__date__gte=date_create_from)
-    if date_create_to:
-        applications = applications.filter(date_create__date__lte=date_create_to)
-    if deadline_from:
-        applications = applications.filter(deadline__date__gte=deadline_from)
-    if deadline_to:
-        applications = applications.filter(deadline__date__lte=deadline_to)
+    if mine:
+        applications = applications.filter(executor=request.user)
+    if date_create_from_date:
+        applications = applications.filter(date_create__date__gte=date_create_from_date)
+    if date_create_to_date:
+        applications = applications.filter(date_create__date__lte=date_create_to_date)
+    if not invalid_deadline_range:
+        if deadline_from_date:
+            applications = applications.filter(deadline__date__gte=deadline_from_date)
+        if deadline_to_date:
+            applications = applications.filter(deadline__date__lte=deadline_to_date)
 
     filtered_applications = applications
-    completed_status_filter = Q(status__code="completed") | Q(status__name="Выполнено")
-    completed_applications = _mark_deadline_state(list(filtered_applications.filter(completed_status_filter)))
+    current_membership = get_current_membership(request.user, request=request)
+    completed_status_filter = Q(status__code="completed")
+    completed_applications_qs = (
+        Application.objects
+        .filter(organization=organization)
+        .filter(completed_status_filter)
+        .select_related("organization", "location", "equipment", "executor", "priority", "status")
+        .order_by("-created_at")
+    )
+    if current_membership and current_membership.role in (
+        OrganizationMembership.Role.ENGINEER,
+        OrganizationMembership.Role.CHIEF_ENGINEER,
+    ):
+        completed_applications_qs = completed_applications_qs.filter(executor=request.user)
+        completed_applications_title = "Мои выполненные заявки"
+    else:
+        completed_applications_title = "Выполненные заявки"
+    completed_applications = _mark_deadline_state(list(completed_applications_qs))
     applications = _mark_deadline_state(
         list(filtered_applications.exclude(completed_status_filter))
     )
@@ -314,10 +360,14 @@ def applications_list(request):
             "status_groups": status_groups,
             "status_chart": status_chart,
             "q": q,
+            "filter_errors": filter_errors,
+            "completed_applications_title": completed_applications_title,
+            **permission_flags(request.user, request=request),
             "filters": {
                 "status": status_id,
                 "priority": priority_id,
                 "executor": executor_id,
+                "mine": "1" if mine else "",
                 "date_create_from": date_create_from,
                 "date_create_to": date_create_to,
                 "deadline_from": deadline_from,
@@ -332,6 +382,7 @@ def application_detail(request, application_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "applications.view", request=request)
     application = get_object_or_404(
         Application.objects.select_related(
             "organization",
@@ -362,6 +413,7 @@ def application_detail(request, application_id: int):
             "application": application,
             "history": history,
             "status_form": status_form,
+            **permission_flags(request.user, request=request),
         },
     )
 
@@ -371,6 +423,7 @@ def application_create(request):
     current_organization = _require_current_organization(request)
     if current_organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "applications.create", request=request)
 
     if request.method == "POST":
         form = ApplicationForm(request.POST, hide_organization=True, organization=current_organization)
@@ -409,6 +462,7 @@ def application_edit(request, application_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "applications.update", request=request)
     application = get_object_or_404(
         Application.objects.select_related("organization", "status"),
         id=application_id,
@@ -456,6 +510,7 @@ def application_status_update(request, application_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "applications.update_status", request=request)
     application = get_object_or_404(
         Application.objects.select_related("organization", "status"),
         id=application_id,
@@ -499,6 +554,7 @@ def locations_list(request):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "locations.view", request=request)
     q = (request.GET.get("q") or "").strip()
     equipment_presence = (request.GET.get("equipment_presence") or "").strip()
     locations = (
@@ -528,6 +584,7 @@ def locations_list(request):
             "location_nodes": _location_tree_rows(list(locations)),
             "q": q,
             "equipment_presence": equipment_presence,
+            **permission_flags(request.user, request=request),
         },
     )
 
@@ -537,6 +594,7 @@ def location_detail_standalone(request, location_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "locations.view", request=request)
     location = get_object_or_404(
         Location.objects.select_related("organization", "parent"),
         id=location_id,
@@ -562,6 +620,7 @@ def location_detail_standalone(request, location_id: int):
             "children": children,
             "location_models": location.location_models.order_by("-created_at"),
             "equipment": equipment,
+            **permission_flags(request.user, request=request),
         },
     )
 
@@ -571,6 +630,7 @@ def location_create_standalone(request):
     current_organization = _require_current_organization(request)
     if current_organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "locations.create", request=request)
 
     if request.method == "POST":
         form = LocationForm(request.POST, hide_organization=True, organization=current_organization)
@@ -606,6 +666,7 @@ def location_edit_standalone(request, location_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "locations.update", request=request)
     location = get_object_or_404(Location, id=location_id, organization=organization)
 
     if request.method == "POST":
@@ -645,6 +706,7 @@ def location_model_create(request, location_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "locations.update", request=request)
     location = get_object_or_404(
         Location.objects.select_related("organization", "parent"),
         id=location_id,
@@ -686,6 +748,7 @@ def equipment_list(request):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "equipment.view", request=request)
     q = (request.GET.get("q") or "").strip()
     equipment = (
         Equipment.objects
@@ -724,6 +787,7 @@ def equipment_list(request):
             "unassigned_status_count": equipment.filter(status__isnull=True).count(),
             "unassigned_type_count": equipment.filter(type_equipment__isnull=True).count(),
             "q": q,
+            **permission_flags(request.user, request=request),
         },
     )
 
@@ -733,6 +797,7 @@ def equipment_detail(request, equipment_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "equipment.view", request=request)
     equipment = get_object_or_404(
         Equipment.objects.select_related("organization", "location", "status", "type_equipment"),
         id=equipment_id,
@@ -759,6 +824,7 @@ def equipment_detail(request, equipment_id: int):
             "equipment": equipment,
             "history": history,
             "status_form": status_form,
+            **permission_flags(request.user, request=request),
         },
     )
 
@@ -768,6 +834,7 @@ def equipment_create(request):
     current_organization = _require_current_organization(request)
     if current_organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "equipment.create", request=request)
 
     if request.method == "POST":
         form = EquipmentForm(request.POST, hide_organization=True, organization=current_organization)
@@ -796,6 +863,7 @@ def equipment_edit(request, equipment_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "equipment.update", request=request)
     equipment = get_object_or_404(
         Equipment.objects.select_related("organization", "status"),
         id=equipment_id,
@@ -844,6 +912,7 @@ def equipment_status_update(request, equipment_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "equipment.update_status", request=request)
     equipment = get_object_or_404(
         Equipment.objects.select_related("organization", "status"),
         id=equipment_id,
@@ -893,6 +962,7 @@ def application_delete_confirm(request, application_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "applications.delete", request=request)
     application = get_object_or_404(Application, id=application_id, organization=organization)
     return render(
         request,
@@ -913,6 +983,7 @@ def application_delete(request, application_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "applications.delete", request=request)
     application = get_object_or_404(Application, id=application_id, organization=organization)
     name = application.name_application
     application.delete()
@@ -925,6 +996,7 @@ def equipment_delete_confirm(request, equipment_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "equipment.delete", request=request)
     equipment = get_object_or_404(Equipment, id=equipment_id, organization=organization)
     return render(
         request,
@@ -945,6 +1017,7 @@ def equipment_delete(request, equipment_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "equipment.delete", request=request)
     equipment = get_object_or_404(Equipment, id=equipment_id, organization=organization)
     name = equipment.name_equipment
     equipment.delete()
@@ -957,6 +1030,7 @@ def location_delete_confirm(request, location_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "locations.delete", request=request)
     location = get_object_or_404(Location, id=location_id, organization=organization)
     descendant_count = len(_location_descendant_ids(location))
     return render(
@@ -983,6 +1057,7 @@ def location_delete(request, location_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "locations.delete", request=request)
     location = get_object_or_404(Location, id=location_id, organization=organization)
     name = location.name
     descendant_ids = _location_descendant_ids(location)
@@ -997,15 +1072,29 @@ def location_delete(request, location_id: int):
 
 @login_required
 def users_list(request):
-    membership = get_current_membership(request.user)
+    membership = get_current_membership(request.user, request=request)
     if membership is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "users.view", request=request)
     organization = membership.organization
     q = (request.GET.get("q") or "").strip()
     organization_id = (request.GET.get("organization") or "").strip()
     department_id = (request.GET.get("department") or "").strip()
     date_reception_from = (request.GET.get("date_reception_from") or "").strip()
     date_reception_to = (request.GET.get("date_reception_to") or "").strip()
+    filter_errors = []
+    date_reception_from_date = _parse_filter_date(date_reception_from)
+    date_reception_to_date = _parse_filter_date(date_reception_to)
+    invalid_date_reception_range = bool(
+        date_reception_from
+        and date_reception_to
+        and date_reception_from_date
+        and date_reception_to_date
+        and date_reception_from_date > date_reception_to_date
+    )
+    if invalid_date_reception_range:
+        filter_errors.append("Неверный диапазон дат")
+
     memberships = (
         OrganizationMembership.objects
         .filter(organization=organization, status=OrganizationMembership.Status.ACTIVE)
@@ -1025,10 +1114,11 @@ def users_list(request):
         memberships = memberships.none()
     if department_id:
         memberships = memberships.filter(department_id=department_id)
-    if date_reception_from:
-        memberships = memberships.filter(date_reception__gte=date_reception_from)
-    if date_reception_to:
-        memberships = memberships.filter(date_reception__lte=date_reception_to)
+    if not invalid_date_reception_range:
+        if date_reception_from_date:
+            memberships = memberships.filter(date_reception__gte=date_reception_from_date)
+        if date_reception_to_date:
+            memberships = memberships.filter(date_reception__lte=date_reception_to_date)
 
     departments = Department.objects.filter(organization=organization).order_by("name")
 
@@ -1041,7 +1131,8 @@ def users_list(request):
             "organizations": [organization],
             "departments": departments,
             "current_organization": organization,
-            "can_invite_users": membership.role == OrganizationMembership.Role.ADMIN,
+            "filter_errors": filter_errors,
+            **permission_flags(request.user, request=request),
             "filters": {
                 "organization": organization_id,
                 "department": department_id,
@@ -1054,12 +1145,10 @@ def users_list(request):
 
 @login_required
 def organization_invitation_create(request):
-    membership = get_current_membership(request.user)
+    membership = get_current_membership(request.user, request=request)
     if membership is None:
         return _organization_access_denied(request)
-    if not user_is_org_admin(request.user):
-        messages.error(request, "Приглашать сотрудников может только администратор организации.")
-        return redirect("parmodels:users_list")
+    require_permission(request.user, "users.invite", request=request)
 
     organization = membership.organization
     if request.method == "POST":
@@ -1167,9 +1256,10 @@ def organization_invitation_accept(request, token):
 
 @login_required
 def user_detail(request, user_id: int):
-    current_membership = get_current_membership(request.user)
+    current_membership = get_current_membership(request.user, request=request)
     if current_membership is None:
         return _organization_access_denied(request)
+    require_permission(request.user, "users.view", request=request)
     organization = current_membership.organization
     User = get_user_model()
     user_obj = get_object_or_404(
@@ -1188,20 +1278,66 @@ def user_detail(request, user_id: int):
 
 @login_required
 def profile(request):
-    current_membership = get_current_membership(request.user)
+    current_membership = get_current_membership(request.user, request=request)
     if current_membership is None:
         return _organization_access_denied(request)
-    memberships = (
+    require_permission(request.user, "profile.view", request=request)
+    active_memberships = (
         OrganizationMembership.objects
         .filter(user=request.user, organization=current_membership.organization)
         .select_related("organization", "department")
         .order_by("organization__name", "department__name")
     )
-    return render(request, "profile.html", {"memberships": memberships})
+    all_active_memberships = (
+        OrganizationMembership.objects
+        .filter(user=request.user, status=OrganizationMembership.Status.ACTIVE)
+        .select_related("organization", "department")
+        .order_by("organization__name", "department__name")
+    )
+    show_organization_card = current_membership.role in (
+        OrganizationMembership.Role.ADMIN,
+        OrganizationMembership.Role.CHIEF_ENGINEER,
+    )
+    return render(
+        request,
+        "profile.html",
+        {
+            "memberships": active_memberships,
+            "active_memberships": all_active_memberships,
+            "current_membership": current_membership,
+            "show_organization_card": show_organization_card,
+            **permission_flags(request.user, request=request),
+        },
+    )
+
+
+@login_required
+@require_POST
+def profile_switch_organization(request):
+    organization_id = request.POST.get("organization_id")
+    membership = (
+        OrganizationMembership.objects
+        .filter(
+            user=request.user,
+            organization_id=organization_id,
+            status=OrganizationMembership.Status.ACTIVE,
+        )
+        .first()
+    )
+    if membership is None:
+        raise PermissionDenied
+
+    request.session[CURRENT_ORGANIZATION_SESSION_KEY] = membership.organization_id
+    messages.success(request, f"Текущая организация: {membership.organization.name}")
+    return redirect("parmodels:profile")
 
 
 @login_required
 def profile_edit(request):
+    current_membership = get_current_membership(request.user, request=request)
+    if current_membership is None:
+        return _organization_access_denied(request)
+    require_permission(request.user, "profile.update", request=request)
     if request.method == "POST":
         form = UserProfileForm(request.POST, instance=request.user)
         if form.is_valid():

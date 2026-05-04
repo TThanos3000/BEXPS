@@ -7,7 +7,9 @@
     <h1 class="h3 mb-1">Оборудование</h1>
     <div class="text-secondary">Статусы, типы и привязка к локациям</div>
   </div>
-  <a class="btn btn-primary" href="{% url 'parmodels:equipment_create' %}">Добавить</a>
+  {% if can_create_equipment %}
+    <a class="btn btn-primary" href="{% url 'parmodels:equipment_create' %}">Добавить</a>
+  {% endif %}
 </div>
 
 <form method="get" class="row g-2 mb-3">

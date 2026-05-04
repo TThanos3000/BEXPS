@@ -1,3 +1,4 @@
+from django import forms
 from django.contrib import admin
 from .models import (
     Application,
@@ -16,6 +17,35 @@ from .models import (
     OrganizationInvitation,
     OrganizationMembership,
 )
+
+
+class OrganizationMembershipAdminForm(forms.ModelForm):
+    class Meta:
+        model = OrganizationMembership
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        organization_id = None
+        if self.instance and self.instance.pk:
+            organization_id = self.instance.organization_id
+        if self.data.get("organization"):
+            organization_id = self.data.get("organization")
+
+        if organization_id:
+            self.fields["department"].queryset = Department.objects.filter(
+                organization_id=organization_id
+            ).order_by("name")
+        else:
+            self.fields["department"].queryset = Department.objects.none()
+
+    def clean(self):
+        cleaned_data = super().clean()
+        organization = cleaned_data.get("organization")
+        department = cleaned_data.get("department")
+        if department and organization and department.organization_id != organization.id:
+            self.add_error("department", "Департамент должен принадлежать выбранной организации.")
+        return cleaned_data
 
 
 @admin.register(Location)
@@ -192,6 +222,7 @@ class DepartmentAdmin(admin.ModelAdmin):
 
 @admin.register(OrganizationMembership)
 class OrganizationMembershipAdmin(admin.ModelAdmin):
+    form = OrganizationMembershipAdminForm
     list_display = ("id", "organization", "user", "role", "status", "department", "position", "joined_at")
     list_filter = ("role", "status", "organization", "department")
     search_fields = (

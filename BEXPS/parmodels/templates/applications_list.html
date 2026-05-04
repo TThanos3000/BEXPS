@@ -7,7 +7,9 @@
     <h1 class="h3 mb-1">Заявки</h1>
     <div class="text-secondary">Поиск, статусы и контроль исполнения</div>
   </div>
-  <a class="btn btn-primary" href="{% url 'parmodels:application_create' %}">Добавить</a>
+  {% if can_create_application %}
+    <a class="btn btn-primary" href="{% url 'parmodels:application_create' %}">Добавить</a>
+  {% endif %}
 </div>
 
 <form method="get" class="row g-2 mb-3">
@@ -37,6 +39,12 @@
         <div class="modal-body">
           <input type="hidden" name="q" value="{{ q }}">
           <div class="row g-3">
+            <div class="col-12">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="mineFilter" name="mine" value="1" {% if filters.mine == "1" %}checked{% endif %}>
+                <label class="form-check-label" for="mineFilter">Мои заявки</label>
+              </div>
+            </div>
             <div class="col-12 col-md-6 col-xl-3">
               <label class="form-label small text-secondary" for="statusFilter">Статус</label>
               <select class="form-select" id="statusFilter" name="status">
@@ -92,6 +100,14 @@
     </div>
   </div>
 </div>
+
+{% if filter_errors %}
+  <div class="alert alert-warning">
+    {% for error in filter_errors %}
+      <div>{{ error }}</div>
+    {% endfor %}
+  </div>
+{% endif %}
 
 <div class="mb-3">
   <button class="btn btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#applicationsStats" aria-expanded="false" aria-controls="applicationsStats">
@@ -199,10 +215,10 @@
 <div class="card">
   <div class="card-body">
     <button class="btn btn-outline-success mb-3" type="button" data-bs-toggle="collapse" data-bs-target="#completedApplications" aria-expanded="false" aria-controls="completedApplications">
-      Выполненные заявки: {{ completed_applications|length }}
+      {{ completed_applications_title }}: {{ completed_applications|length }}
     </button>
     <div class="collapse" id="completedApplications">
-      <h2 class="h5 mb-3">Выполненные заявки</h2>
+      <h2 class="h5 mb-3">{{ completed_applications_title }}</h2>
       <div class="table-responsive">
         <table class="table align-middle">
           <thead>

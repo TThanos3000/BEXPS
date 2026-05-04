@@ -159,6 +159,21 @@ class OrganizationMembership(models.Model):
     def __str__(self) -> str:
         return f"{self.user} / {self.organization} / {self.role}"
 
+    def clean(self):
+        super().clean()
+        if (
+            self.department_id
+            and self.organization_id
+            and self.department.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                {"department": "Департамент должен принадлежать выбранной организации."}
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
 
 class OrganizationInvitation(models.Model):
     class Status(models.TextChoices):
@@ -206,6 +221,17 @@ class OrganizationInvitation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.email} / {self.organization} / {self.status}"
+
+    def clean(self):
+        super().clean()
+        if (
+            self.department_id
+            and self.organization_id
+            and self.department.organization_id != self.organization_id
+        ):
+            raise ValidationError(
+                {"department": "Департамент должен принадлежать выбранной организации."}
+            )
 
 
 class LocationModel(models.Model):
