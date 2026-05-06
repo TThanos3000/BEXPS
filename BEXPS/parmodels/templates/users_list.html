@@ -40,6 +40,9 @@
         </div>
         <div class="modal-body">
           <input type="hidden" name="q" value="{{ q }}">
+          {% if invalid_date_reception_range %}
+            <div class="alert alert-danger" role="alert">Неверный диапазон дат</div>
+          {% endif %}
           <div class="row g-3">
             <div class="col-12 col-md-6">
               <label class="form-label small text-secondary" for="organizationFilter">Организация</label>
@@ -63,11 +66,17 @@
             </div>
             <div class="col-12 col-md-6">
               <label class="form-label small text-secondary" for="dateReceptionFrom">Дата выхода от</label>
-              <input class="form-control" id="dateReceptionFrom" type="date" name="date_reception_from" value="{{ filters.date_reception_from }}">
+              <input class="form-control {% if invalid_date_reception_range %}is-invalid{% endif %}" id="dateReceptionFrom" type="date" name="date_reception_from" value="{{ filters.date_reception_from }}">
+              {% if invalid_date_reception_range %}
+                <div class="invalid-feedback">Неверный диапазон дат</div>
+              {% endif %}
             </div>
             <div class="col-12 col-md-6">
               <label class="form-label small text-secondary" for="dateReceptionTo">Дата выхода до</label>
-              <input class="form-control" id="dateReceptionTo" type="date" name="date_reception_to" value="{{ filters.date_reception_to }}">
+              <input class="form-control {% if invalid_date_reception_range %}is-invalid{% endif %}" id="dateReceptionTo" type="date" name="date_reception_to" value="{{ filters.date_reception_to }}">
+              {% if invalid_date_reception_range %}
+                <div class="invalid-feedback">Неверный диапазон дат</div>
+              {% endif %}
             </div>
           </div>
         </div>
@@ -100,9 +109,9 @@
             <th>Телефон</th>
             <th>Организация</th>
             <th>Департамент</th>
-            <th>Роль</th>
             <th>Должность</th>
             <th>Дата выхода</th>
+            <th>Загрузка</th>
           </tr>
         </thead>
         <tbody>
@@ -125,9 +134,16 @@
                 <td>{{ user.phone|default:"—" }}</td>
                 <td>{{ membership.organization.name|default:"—" }}</td>
                 <td>{{ membership.department.name|default:"—" }}</td>
-                <td>{{ membership.role|default:"—" }}</td>
                 <td>{{ membership.position|default:"—" }}</td>
                 <td class="text-secondary small">{{ membership.date_reception|default:"Не указана" }}</td>
+                <td style="min-width: 180px;">
+                  <div class="d-flex align-items-center gap-2">
+                    <div class="progress flex-grow-1" role="progressbar" aria-valuenow="{{ membership.workload_percent }}" aria-valuemin="0" aria-valuemax="100" style="height: 8px;">
+                      <div class="progress-bar {{ membership.workload_bar_class }}" style="width: {{ membership.workload_percent }}%;"></div>
+                    </div>
+                    <span class="text-secondary small text-nowrap">{{ membership.workload_value }}/100</span>
+                  </div>
+                </td>
               </tr>
             {% endwith %}
           {% empty %}

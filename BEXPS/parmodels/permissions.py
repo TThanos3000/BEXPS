@@ -86,6 +86,22 @@ def require_permission(user, permission, request=None):
         raise PermissionDenied
 
 
+def can_update_application_status(user, application, request=None):
+    membership = get_current_membership(user, request=request)
+    if membership is None:
+        return False
+    if "applications.update_status" not in ROLE_PERMISSIONS.get(membership.role, set()):
+        return False
+    if membership.role == OrganizationMembership.Role.ENGINEER:
+        return application.executor_id == user.id
+    return True
+
+
+def require_application_status_permission(user, application, request=None):
+    if not can_update_application_status(user, application, request=request):
+        raise PermissionDenied
+
+
 def permission_flags(user, request=None):
     permissions = get_user_permissions(user, request=request)
     return {

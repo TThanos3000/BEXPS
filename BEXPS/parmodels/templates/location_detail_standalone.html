@@ -6,7 +6,9 @@
   <a class="text-secondary text-decoration-none" href="{% url 'parmodels:locations_list' %}">← назад к локациям</a>
   <div class="d-flex gap-2">
     {% if can_create_location_model %}
-      <a class="btn btn-primary" href="{% url 'parmodels:location_model_create' location.id %}">Добавить техплан</a>
+      <a class="btn btn-primary" href="{% url 'parmodels:bim_viewer_launch' location.id %}">
+        {% if has_location_model %}Открыть техплан{% else %}Добавить техплан{% endif %}
+      </a>
     {% endif %}
     {% if can_update_location %}
       <a class="btn btn-outline-primary" href="{% url 'parmodels:location_edit_standalone' location.id %}">Редактировать</a>

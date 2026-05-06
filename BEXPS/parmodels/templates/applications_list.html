@@ -38,6 +38,9 @@
         </div>
         <div class="modal-body">
           <input type="hidden" name="q" value="{{ q }}">
+          {% if invalid_deadline_range %}
+            <div class="alert alert-danger" role="alert">Неверный диапазон дат</div>
+          {% endif %}
           <div class="row g-3">
             <div class="col-12">
               <div class="form-check">
@@ -84,11 +87,17 @@
             </div>
             <div class="col-12 col-md-6 col-xl-3">
               <label class="form-label small text-secondary" for="deadlineFrom">Дедлайн от</label>
-              <input class="form-control" id="deadlineFrom" type="date" name="deadline_from" value="{{ filters.deadline_from }}">
+              <input class="form-control {% if invalid_deadline_range %}is-invalid{% endif %}" id="deadlineFrom" type="date" name="deadline_from" value="{{ filters.deadline_from }}">
+              {% if invalid_deadline_range %}
+                <div class="invalid-feedback">Неверный диапазон дат</div>
+              {% endif %}
             </div>
             <div class="col-12 col-md-6 col-xl-3">
               <label class="form-label small text-secondary" for="deadlineTo">Дедлайн до</label>
-              <input class="form-control" id="deadlineTo" type="date" name="deadline_to" value="{{ filters.deadline_to }}">
+              <input class="form-control {% if invalid_deadline_range %}is-invalid{% endif %}" id="deadlineTo" type="date" name="deadline_to" value="{{ filters.deadline_to }}">
+              {% if invalid_deadline_range %}
+                <div class="invalid-feedback">Неверный диапазон дат</div>
+              {% endif %}
             </div>
           </div>
         </div>

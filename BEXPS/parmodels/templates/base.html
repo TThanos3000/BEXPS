@@ -34,7 +34,7 @@
               <a class="nav-link {% if url_name == 'applications_list' or url_name == 'application_create' or url_name == 'application_detail' or url_name == 'application_edit' or url_name == 'application_status_update' or url_name == 'application_delete_confirm' or url_name == 'application_delete' %}active fw-semibold{% endif %}" href="{% url 'parmodels:applications_list' %}">Заявки</a>
             </li>
             <li class="nav-item">
-              <a class="nav-link {% if url_name == 'locations_list' or url_name == 'location_create_standalone' or url_name == 'location_detail_standalone' or url_name == 'location_edit_standalone' or url_name == 'location_model_create' or url_name == 'location_delete_confirm' or url_name == 'location_delete' %}active fw-semibold{% endif %}" href="{% url 'parmodels:locations_list' %}">Локации</a>
+              <a class="nav-link {% if url_name == 'locations_list' or url_name == 'location_create_standalone' or url_name == 'location_detail_standalone' or url_name == 'location_edit_standalone' or url_name == 'bim_viewer_launch' or url_name == 'location_model_create' or url_name == 'location_delete_confirm' or url_name == 'location_delete' %}active fw-semibold{% endif %}" href="{% url 'parmodels:locations_list' %}">Локации</a>
             </li>
             <li class="nav-item">
               <a class="nav-link {% if url_name == 'equipment_list' or url_name == 'equipment_create' or url_name == 'equipment_detail' or url_name == 'equipment_edit' or url_name == 'equipment_status_update' or url_name == 'equipment_delete_confirm' or url_name == 'equipment_delete' %}active fw-semibold{% endif %}" href="{% url 'parmodels:equipment_list' %}">Оборудование</a>

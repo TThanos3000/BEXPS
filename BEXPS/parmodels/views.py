@@ -1,18 +1,22 @@
 import json
 import re
 from datetime import timedelta
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Sum
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.utils import timezone
-from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.http import require_GET, require_POST, require_http_methods
 
 from .forms import (
     ApplicationEditForm,
@@ -42,7 +46,12 @@ from .models import (
     OrganizationInvitation,
     OrganizationMembership,
 )
-from .permissions import permission_flags, require_permission
+from .permissions import (
+    can_update_application_status,
+    permission_flags,
+    require_application_status_permission,
+    require_permission,
+)
 from .services import (
     CURRENT_ORGANIZATION_SESSION_KEY,
     get_current_membership,
@@ -175,10 +184,115 @@ def _organization_users_queryset(organization):
     )
 
 
+def _json_access_denied(message="Нет доступа к организации", status=403):
+    return JsonResponse({"status": "error", "message": message}, status=status)
+
+
 def _parse_filter_date(value):
     if not value:
         return None
     return parse_date(value)
+
+
+def _with_query_param(url, **params):
+    split = urlsplit(url)
+    query = dict(parse_qsl(split.query, keep_blank_values=True))
+    query.update({key: str(value) for key, value in params.items() if value is not None})
+    return urlunsplit((split.scheme, split.netloc, split.path, urlencode(query), split.fragment))
+
+
+def _default_inwors_scene():
+    return {
+        "K_SIMILAR": 1,
+        "techPlane": None,
+        "walls": [],
+        "models": [],
+        "pipes": [],
+        "wires": [],
+        "lines": [],
+        "units": [],
+        "cubes": [],
+        "ceils": [],
+        "compounds": [],
+        "ifcs": [],
+    }
+
+
+def _bim_meta(total):
+    return {"total": total, "page": 1, "per_page": total or 50}
+
+
+def _bim_response(data):
+    return JsonResponse({"status": "success", "data": data, "meta": _bim_meta(len(data))})
+
+
+def _format_datetime(value):
+    return value.isoformat() if value else ""
+
+
+def _format_date(value):
+    return value.isoformat() if value else ""
+
+
+def _bim_location_payload(location):
+    return {
+        "id": location.id,
+        "name": location.name,
+        "parent_id": location.parent_id or 0,
+        "description": location.description,
+        "created_at": _format_datetime(location.created_at),
+    }
+
+
+def _bim_equipment_payload(equipment):
+    return {
+        "id": equipment.id,
+        "name": equipment.name_equipment,
+        "location_id": equipment.location_id or 0,
+        "code": equipment.inventory_number,
+        "cat_id": equipment.type_equipment_id or 0,
+        "category_name": equipment.type_equipment.name if equipment.type_equipment else "",
+        "about": equipment.about,
+        "status": equipment.status_id or 0,
+        "status_name": equipment.status.name if equipment.status else "",
+        "quantity": 1,
+        "vendor": "",
+        "start": _format_date(equipment.date_input),
+        "warranty_end": "",
+    }
+
+
+def _bim_task_payload(application):
+    executor_name = ""
+    if application.executor:
+        executor_name = (
+            application.executor.get_full_name()
+            or application.executor.email
+            or application.executor.username
+        )
+    return {
+        "id": application.id,
+        "type": application.priority_id or 0,
+        "type_name": application.priority.name if application.priority else "",
+        "status": application.status_id or 0,
+        "status_name": application.status.name if application.status else "",
+        "real_status": application.status.code if application.status else "",
+        "real_status_name": application.status.name if application.status else "",
+        "about": application.about,
+        "location_id": application.location_id or 0,
+        "location_name": application.location.name if application.location else "",
+        "object_id": application.equipment_id or 0,
+        "object_name": application.equipment.name_equipment if application.equipment else "",
+        "user_id": application.executor_id or 0,
+        "user_name": executor_name,
+        "created_at": _format_datetime(application.date_create or application.created_at),
+        "start": None,
+        "finish": _format_datetime(application.deadline) or None,
+        "class": 0,
+        "class_name": application.priority.name if application.priority else "",
+        "steps": [],
+        "files": [],
+    }
 
 
 def _status_display(status):
@@ -213,6 +327,20 @@ def _application_status_groups(queryset=None):
     return groups
 
 
+def _completed_status_filter(prefix=""):
+    code_field = f"{prefix}status__code"
+    name_field = f"{prefix}status__name"
+    return Q(**{code_field: "completed"}) | Q(**{name_field: "Выполнено"})
+
+
+def _active_application_filter(prefix=""):
+    return Q(**{f"{prefix}status__isnull": True}) | ~_completed_status_filter(prefix)
+
+
+def _application_priority_has_weight():
+    return any(field.name == "weight" for field in ApplicationPriority._meta.fields)
+
+
 def _mark_deadline_state(applications):
     threshold = timezone.now() + timedelta(days=2)
     for application in applications:
@@ -229,25 +357,103 @@ def dashboard(request):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
-    completed_status_codes = ("done", "completed", "closed", "finished")
+    current_membership = get_current_membership(request.user, request=request)
+    show_my_tasks = bool(
+        current_membership
+        and current_membership.role
+        in (OrganizationMembership.Role.ENGINEER, OrganizationMembership.Role.CHIEF_ENGINEER)
+    )
+    completed_filter = _completed_status_filter()
+    active_filter = _active_application_filter()
+    priority_has_weight = _application_priority_has_weight()
     applications = Application.objects.filter(organization=organization)
+    my_tasks = []
+    if show_my_tasks:
+        my_tasks = _mark_deadline_state(
+            list(
+                applications
+                .filter(executor=request.user)
+                .filter(active_filter)
+                .select_related("status", "priority", "location", "equipment")
+                .order_by("deadline", "-created_at")[:6]
+            )
+        )
+    problematic_locations = (
+        Location.objects
+        .filter(organization=organization)
+        .annotate(
+            active_applications_count=Count(
+                "applications",
+                filter=Q(applications__organization=organization)
+                & _active_application_filter("applications__"),
+            )
+        )
+        .filter(active_applications_count__gt=3)
+        .order_by("-active_applications_count", "name")[:8]
+    )
+    show_team_load = bool(
+        current_membership
+        and current_membership.role
+        in (
+            OrganizationMembership.Role.ADMIN,
+            OrganizationMembership.Role.DISPATCHER,
+            OrganizationMembership.Role.CHIEF_ENGINEER,
+        )
+    )
+    team_load = 0
+    team_load_percent = 0
+    team_load_bar_class = "bg-success"
+    engineers_count = 0
+    max_capacity = 0
+    if show_team_load:
+        engineer_user_ids = list(
+            OrganizationMembership.objects
+            .filter(
+                organization=organization,
+                status=OrganizationMembership.Status.ACTIVE,
+                role=OrganizationMembership.Role.ENGINEER,
+            )
+            .values_list("user_id", flat=True)
+        )
+        engineers_count = len(engineer_user_ids)
+        max_capacity = engineers_count * 100
+        team_applications = (
+            applications
+            .filter(executor_id__in=engineer_user_ids)
+            .filter(active_filter)
+        )
+        if priority_has_weight:
+            team_load = team_applications.aggregate(total=Sum("priority__weight"))["total"] or 0
+        if max_capacity:
+            raw_percent = (team_load / max_capacity) * 100
+            team_load_percent = min(int(raw_percent), 100)
+            if raw_percent >= 100:
+                team_load_bar_class = "bg-danger"
+            elif raw_percent >= 60:
+                team_load_bar_class = "bg-warning"
 
     context = {
         "current_organization": organization,
         **permission_flags(request.user, request=request),
         "applications_count": applications.count(),
-        "active_applications_count": applications.exclude(
-            status__code__in=completed_status_codes
-        ).count(),
-        "completed_applications_count": applications.filter(
-            status__code__in=completed_status_codes
-        ).count(),
+        "active_applications_count": applications.filter(active_filter).count(),
+        "completed_applications_count": applications.filter(completed_filter).count(),
         "locations_count": Location.objects.filter(organization=organization).count(),
         "equipment_count": Equipment.objects.filter(organization=organization).count(),
         "users_count": OrganizationMembership.objects.filter(
             organization=organization,
             status=OrganizationMembership.Status.ACTIVE,
         ).count(),
+        "show_my_tasks": show_my_tasks,
+        "my_tasks": my_tasks,
+        "problematic_locations": problematic_locations,
+        "show_team_load": show_team_load,
+        "engineers_count": engineers_count,
+        "team_load": int(team_load),
+        "max_capacity": max_capacity,
+        "team_load_percent": team_load_percent,
+        "team_load_bar_class": team_load_bar_class,
+        "priority_has_weight": priority_has_weight,
     }
     return render(request, "dashboard.html", context)
 
@@ -318,7 +524,7 @@ def applications_list(request):
 
     filtered_applications = applications
     current_membership = get_current_membership(request.user, request=request)
-    completed_status_filter = Q(status__code="completed")
+    completed_status_filter = _completed_status_filter()
     completed_applications_qs = (
         Application.objects
         .filter(organization=organization)
@@ -361,6 +567,7 @@ def applications_list(request):
             "status_chart": status_chart,
             "q": q,
             "filter_errors": filter_errors,
+            "invalid_deadline_range": invalid_deadline_range,
             "completed_applications_title": completed_applications_title,
             **permission_flags(request.user, request=request),
             "filters": {
@@ -406,6 +613,12 @@ def application_detail(request, application_id: int):
         statuses=ApplicationStatus.objects.filter(is_active=True).order_by("name", "code"),
         initial={"status": application.status},
     )
+    application_permission_flags = permission_flags(request.user, request=request)
+    application_permission_flags["can_update_application_status"] = can_update_application_status(
+        request.user,
+        application,
+        request=request,
+    )
     return render(
         request,
         "application_detail.html",
@@ -413,7 +626,7 @@ def application_detail(request, application_id: int):
             "application": application,
             "history": history,
             "status_form": status_form,
-            **permission_flags(request.user, request=request),
+            **application_permission_flags,
         },
     )
 
@@ -510,12 +723,12 @@ def application_status_update(request, application_id: int):
     organization = _require_current_organization(request)
     if organization is None:
         return _organization_access_denied(request)
-    require_permission(request.user, "applications.update_status", request=request)
     application = get_object_or_404(
-        Application.objects.select_related("organization", "status"),
+        Application.objects.select_related("organization", "status", "executor"),
         id=application_id,
         organization=organization,
     )
+    require_application_status_permission(request.user, application, request=request)
     old_status = application.status
     form = ApplicationStatusForm(
         request.POST,
@@ -612,17 +825,30 @@ def location_detail_standalone(request, location_id: int):
         .select_related("status", "type_equipment")
         .order_by("name_equipment", "inventory_number")
     )
+    location_models = location.location_models.order_by("-created_at")
     return render(
         request,
         "location_detail_standalone.html",
         {
             "location": location,
             "children": children,
-            "location_models": location.location_models.order_by("-created_at"),
+            "location_models": location_models,
+            "has_location_model": location_models.exists(),
             "equipment": equipment,
             **permission_flags(request.user, request=request),
         },
     )
+
+
+@login_required
+@ensure_csrf_cookie
+def bim_viewer_launch(request, location_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    require_permission(request.user, "locations.view", request=request)
+    get_object_or_404(Location, id=location_id, organization=organization)
+    return redirect(_with_query_param(settings.INWORS_VIEWER_URL, id=location_id))
 
 
 @login_required
@@ -741,6 +967,126 @@ def location_model_create(request, location_id: int):
             "form": form,
         },
     )
+
+
+@login_required
+@ensure_csrf_cookie
+@require_http_methods(["GET", "POST"])
+def bim_location_model_data(request, location_id: int):
+    organization = _get_current_organization(request)
+    if organization is None:
+        return _json_access_denied()
+    location = get_object_or_404(Location, id=location_id, organization=organization)
+
+    if request.method == "GET":
+        require_permission(request.user, "locations.view", request=request)
+        location_model = location.location_models.order_by("-updated_at", "-created_at").first()
+        if location_model:
+            return JsonResponse(location_model.model_json, safe=False)
+        return JsonResponse({})
+
+    require_permission(request.user, "locations.update", request=request)
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return _json_access_denied("Некорректный JSON техплана", status=400)
+
+    if not isinstance(payload, dict):
+        return _json_access_denied("JSON техплана должен быть объектом", status=400)
+
+    location_model = location.location_models.order_by("-updated_at", "-created_at").first()
+    created = location_model is None
+    if location_model is None:
+        location_model = LocationModel(location=location, name=f"Техплан: {location.name}")
+    location_model.model_json = payload
+    location_model.save()
+    return JsonResponse(
+        {
+            "status": "success",
+            "id": location_model.id,
+            "location_id": location.id,
+            "created": created,
+            "updated_at": _format_datetime(location_model.updated_at),
+        }
+    )
+
+
+@login_required
+@require_GET
+def bim_locations_api(request):
+    organization = _get_current_organization(request)
+    if organization is None:
+        return _json_access_denied()
+    require_permission(request.user, "locations.view", request=request)
+
+    locations = (
+        Location.objects
+        .filter(organization=organization)
+        .select_related("parent")
+        .order_by("parent_id", "location_type", "name")
+    )
+    location_id = request.GET.get("id")
+    parent_id = request.GET.get("parent_id")
+    if location_id not in (None, ""):
+        locations = locations.filter(id=location_id)
+    elif parent_id not in (None, ""):
+        if parent_id == "0":
+            locations = locations.filter(parent__isnull=True)
+        else:
+            locations = locations.filter(parent_id=parent_id)
+
+    return _bim_response([_bim_location_payload(location) for location in locations])
+
+
+@login_required
+@require_GET
+def bim_objects_api(request):
+    organization = _get_current_organization(request)
+    if organization is None:
+        return _json_access_denied()
+    require_permission(request.user, "equipment.view", request=request)
+
+    equipment = (
+        Equipment.objects
+        .filter(organization=organization)
+        .select_related("location", "status", "type_equipment")
+        .order_by("location_id", "name_equipment")
+    )
+    equipment_id = request.GET.get("id")
+    parent_id = request.GET.get("parent_id")
+    if equipment_id not in (None, ""):
+        equipment = equipment.filter(id=equipment_id)
+    elif parent_id not in (None, ""):
+        if parent_id == "0":
+            equipment = equipment.filter(location__isnull=True)
+        else:
+            equipment = equipment.filter(location_id=parent_id)
+
+    return _bim_response([_bim_equipment_payload(item) for item in equipment])
+
+
+@login_required
+@require_GET
+def bim_tasks_api(request):
+    organization = _get_current_organization(request)
+    if organization is None:
+        return _json_access_denied()
+    require_permission(request.user, "applications.view", request=request)
+
+    applications = (
+        Application.objects
+        .filter(organization=organization)
+        .select_related("location", "equipment", "executor", "priority", "status")
+        .order_by("-created_at")
+    )
+    location_id = request.GET.get("location_id")
+    object_id = request.GET.get("object_id")
+    if location_id not in (None, ""):
+        applications = applications.filter(location_id=location_id)
+    if object_id not in (None, ""):
+        applications = applications.filter(equipment_id=object_id)
+
+    return _bim_response([_bim_task_payload(application) for application in applications])
 
 
 @login_required
@@ -1121,6 +1467,32 @@ def users_list(request):
             memberships = memberships.filter(date_reception__lte=date_reception_to_date)
 
     departments = Department.objects.filter(organization=organization).order_by("name")
+    memberships = list(memberships)
+    user_ids = [item.user_id for item in memberships]
+    priority_has_weight = _application_priority_has_weight()
+    if priority_has_weight:
+        workload_by_user = {
+            row["executor_id"]: row["workload"] or 0
+            for row in (
+                Application.objects
+                .filter(organization=organization, executor_id__in=user_ids)
+                .filter(_active_application_filter())
+                .values("executor_id")
+                .annotate(workload=Sum("priority__weight"))
+            )
+        }
+    else:
+        workload_by_user = {}
+    for item in memberships:
+        workload = int(workload_by_user.get(item.user_id, 0))
+        item.workload_value = workload
+        item.workload_percent = min(workload, 100)
+        if workload >= 100:
+            item.workload_bar_class = "bg-danger"
+        elif workload >= 60:
+            item.workload_bar_class = "bg-warning"
+        else:
+            item.workload_bar_class = "bg-success"
 
     return render(
         request,
@@ -1132,6 +1504,8 @@ def users_list(request):
             "departments": departments,
             "current_organization": organization,
             "filter_errors": filter_errors,
+            "invalid_date_reception_range": invalid_date_reception_range,
+            "priority_workload_uses_weight": priority_has_weight,
             **permission_flags(request.user, request=request),
             "filters": {
                 "organization": organization_id,

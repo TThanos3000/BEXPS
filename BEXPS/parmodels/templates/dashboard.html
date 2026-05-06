@@ -86,4 +86,126 @@
     </div>
   </div>
 </div>
+
+{% if show_team_load %}
+  <div class="card mt-4">
+    <div class="card-body">
+      <div class="d-flex flex-column flex-md-row justify-content-between gap-2 mb-3">
+        <div>
+          <h2 class="h5 mb-1">Загрузка команды</h2>
+          <div class="text-secondary small">Расчет: количество инженеров × 100 и сумма весов приоритетов активных заявок</div>
+        </div>
+        <span class="badge text-bg-light border text-dark align-self-md-start">Инженеров: {{ engineers_count }}</span>
+      </div>
+      {% if engineers_count %}
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong>{{ team_load }} / {{ max_capacity }}</strong>
+          {% if priority_has_weight %}
+            <span class="text-secondary small">Используется вес приоритета</span>
+          {% else %}
+            <span class="text-secondary small">Вес приоритета недоступен</span>
+          {% endif %}
+        </div>
+        <div class="progress" role="progressbar" aria-valuenow="{{ team_load_percent }}" aria-valuemin="0" aria-valuemax="100" style="height: 12px;">
+          <div class="progress-bar {{ team_load_bar_class }}" style="width: {{ team_load_percent }}%;"></div>
+        </div>
+      {% else %}
+        <div class="alert alert-light border mb-0">Нет инженеров для расчета загрузки</div>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+
+{% if show_my_tasks %}
+  <div class="card mt-4">
+    <div class="card-body">
+      <div class="d-flex flex-column flex-md-row justify-content-between gap-2 mb-3">
+        <div>
+          <h2 class="h5 mb-1">Мои задачи</h2>
+          <div class="text-secondary small">Активные заявки, назначенные на вас</div>
+        </div>
+        <a class="btn btn-sm btn-outline-primary align-self-md-start" href="{% url 'parmodels:applications_list' %}?mine=1">Все мои заявки</a>
+      </div>
+      <div class="row g-3">
+        {% for task in my_tasks %}
+          <div class="col-12 col-lg-6">
+            <a class="card h-100 text-decoration-none text-reset" href="{% url 'parmodels:application_detail' task.id %}">
+              <div class="card-body">
+                <div class="d-flex justify-content-between gap-2 mb-2">
+                  <span class="text-secondary small">№{{ task.id }}</span>
+                  {% if task.deadline %}
+                    {% if task.deadline_is_urgent %}
+                      <span class="badge text-bg-danger">{{ task.deadline|date:"j E Y г. H:i" }}</span>
+                    {% else %}
+                      <span class="badge text-bg-light border text-dark">{{ task.deadline|date:"j E Y г. H:i" }}</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="badge text-bg-light border text-secondary">Без дедлайна</span>
+                  {% endif %}
+                </div>
+                <h3 class="h6 mb-2">{{ task.name_application }}</h3>
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                  {% if task.status %}
+                    <span class="badge" style="background-color: {{ task.status_color }};">{{ task.status.name }}</span>
+                  {% endif %}
+                  {% if task.priority %}
+                    <span class="badge" style="background-color: {{ task.priority_color }};">{{ task.priority.name }}</span>
+                  {% endif %}
+                </div>
+                <div class="text-secondary small">
+                  {% if task.location %}
+                    Локация: {{ task.location.name }}
+                  {% elif task.equipment %}
+                    Оборудование: {{ task.equipment.name_equipment }}
+                  {% else %}
+                    Локация или оборудование не указаны
+                  {% endif %}
+                </div>
+              </div>
+            </a>
+          </div>
+        {% empty %}
+          <div class="col-12">
+            <div class="alert alert-light border mb-0">Активных задач нет.</div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+<div class="card mt-4">
+  <div class="card-body">
+    <h2 class="h5 mb-1">Проблемные локации</h2>
+    <div class="text-secondary small mb-3">Локации с более чем 3 активными заявками</div>
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Локация</th>
+            <th>Тип</th>
+            <th>Активные заявки</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for location in problematic_locations %}
+            <tr>
+              <td>
+                <a class="text-decoration-none" href="{% url 'parmodels:location_detail_standalone' location.id %}">
+                  {{ location.name }}
+                </a>
+              </td>
+              <td>{{ location.get_location_type_display }}</td>
+              <td><span class="badge text-bg-danger">{{ location.active_applications_count }}</span></td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="3" class="text-secondary">Проблемных локаций нет.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}
