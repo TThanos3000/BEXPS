@@ -15,6 +15,7 @@
 <form method="get" class="row g-2 mb-3">
   <div class="col-12 col-md-9 col-lg-10">
     <input class="form-control" type="search" name="q" value="{{ q }}" placeholder="Поиск по названию, инвентарному номеру или external ID">
+    <input type="hidden" name="per_page" value="{{ per_page }}">
   </div>
   <div class="col-12 col-md-3 col-lg-2 d-grid">
     <button class="btn btn-outline-primary" type="submit">Найти</button>
@@ -60,40 +61,191 @@
 
 <div class="card">
   <div class="card-body">
-    <div class="table-responsive">
-      <table class="table align-middle">
-        <thead>
-          <tr>
-            <th>Название</th>
-            <th>Статус</th>
-            <th>Тип</th>
-            <th>Локация</th>
-            <th>Организация</th>
-            <th>Дата ввода</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in equipment %}
-            <tr>
-              <td class="fw-semibold">
-                <a class="text-decoration-none" href="{% url 'parmodels:equipment_detail' item.id %}">
-                  {{ item.name_equipment }}
-                </a>
-              </td>
-              <td>{{ item.status.name|default:"—" }}</td>
-              <td>{{ item.type_equipment.name|default:"—" }}</td>
-              <td>{{ item.location.name|default:"—" }}</td>
-              <td>{{ item.organization.name|default:"—" }}</td>
-              <td class="text-secondary small">{{ item.date_input|default:"—" }}</td>
-            </tr>
-          {% empty %}
-            <tr>
-              <td colspan="6" class="text-secondary">Оборудование не найдено.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-3">
+      <div class="text-secondary small">
+        {% if paginator.count %}
+          Показано {{ page_obj.start_index }}–{{ page_obj.end_index }} из {{ paginator.count }}
+        {% else %}
+          Оборудование не найдено.
+        {% endif %}
+      </div>
+      <div class="d-flex flex-column flex-sm-row align-items-sm-center gap-2">
+        {% if can_delete_equipment %}
+          <button
+            class="btn btn-outline-danger btn-sm"
+            type="button"
+            id="equipmentBulkDeleteButton"
+            data-bs-toggle="modal"
+            data-bs-target="#equipmentBulkDeleteModal"
+            disabled
+          >
+            Удалить выбранное
+          </button>
+        {% endif %}
+        <form method="get" class="d-flex align-items-center gap-2">
+          <input type="hidden" name="q" value="{{ q }}">
+          <label class="form-label mb-0 text-secondary small" for="equipmentPerPage">Показывать по</label>
+          <select class="form-select form-select-sm w-auto" id="equipmentPerPage" name="per_page" onchange="this.form.submit()">
+            {% for option in per_page_options %}
+              <option value="{{ option }}" {% if option == per_page %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+        </form>
+      </div>
     </div>
+
+    <form id="equipmentBulkDeleteForm" method="post" action="{% url 'parmodels:equipment_bulk_delete' %}">
+      {% csrf_token %}
+      <input type="hidden" name="redirect_query" value="{{ current_querystring }}">
+      <div class="table-responsive">
+        <table class="table align-middle">
+          <thead>
+            <tr>
+              {% if can_delete_equipment %}
+                <th style="width: 40px;">
+                  <input class="form-check-input" type="checkbox" id="equipmentSelectAll" aria-label="Выбрать все оборудование на странице">
+                </th>
+              {% endif %}
+              <th>Название</th>
+              <th>Статус</th>
+              <th>Тип</th>
+              <th>Локация</th>
+              <th>Организация</th>
+              <th>Дата ввода</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in equipment %}
+              <tr>
+                {% if can_delete_equipment %}
+                  <td>
+                    <input class="form-check-input equipment-row-checkbox" type="checkbox" name="equipment_ids" value="{{ item.id }}" aria-label="Выбрать {{ item.name_equipment }}">
+                  </td>
+                {% endif %}
+                <td class="fw-semibold">
+                  <a class="text-decoration-none" href="{% url 'parmodels:equipment_detail' item.id %}">
+                    {{ item.name_equipment }}
+                  </a>
+                </td>
+                <td>{{ item.status.name|default:"—" }}</td>
+                <td>{{ item.type_equipment.name|default:"—" }}</td>
+                <td>{{ item.location.name|default:"—" }}</td>
+                <td>{{ item.organization.name|default:"—" }}</td>
+                <td class="text-secondary small">{{ item.date_input|default:"—" }}</td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="{% if can_delete_equipment %}7{% else %}6{% endif %}" class="text-secondary">Оборудование не найдено.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </form>
+
+    {% if page_obj.has_other_pages %}
+      <nav aria-label="Пагинация оборудования">
+        <ul class="pagination flex-wrap justify-content-center mb-0">
+          <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+            {% if page_obj.has_previous %}
+              <a class="page-link" href="?{{ pagination_prefix }}page=1">Первая</a>
+            {% else %}
+              <span class="page-link">Первая</span>
+            {% endif %}
+          </li>
+          <li class="page-item {% if not page_obj.has_previous %}disabled{% endif %}">
+            {% if page_obj.has_previous %}
+              <a class="page-link" href="?{{ pagination_prefix }}page={{ page_obj.previous_page_number }}">Предыдущая</a>
+            {% else %}
+              <span class="page-link">Предыдущая</span>
+            {% endif %}
+          </li>
+
+          {% for page_number in page_numbers %}
+            {% if page_number %}
+              <li class="page-item {% if page_number == page_obj.number %}active{% endif %}">
+                {% if page_number == page_obj.number %}
+                  <span class="page-link">{{ page_number }}</span>
+                {% else %}
+                  <a class="page-link" href="?{{ pagination_prefix }}page={{ page_number }}">{{ page_number }}</a>
+                {% endif %}
+              </li>
+            {% else %}
+              <li class="page-item disabled"><span class="page-link">...</span></li>
+            {% endif %}
+          {% endfor %}
+
+          <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+            {% if page_obj.has_next %}
+              <a class="page-link" href="?{{ pagination_prefix }}page={{ page_obj.next_page_number }}">Следующая</a>
+            {% else %}
+              <span class="page-link">Следующая</span>
+            {% endif %}
+          </li>
+          <li class="page-item {% if not page_obj.has_next %}disabled{% endif %}">
+            {% if page_obj.has_next %}
+              <a class="page-link" href="?{{ pagination_prefix }}page={{ paginator.num_pages }}">Последняя</a>
+            {% else %}
+              <span class="page-link">Последняя</span>
+            {% endif %}
+          </li>
+        </ul>
+      </nav>
+    {% endif %}
   </div>
 </div>
+
+{% if can_delete_equipment %}
+  <div class="modal fade" id="equipmentBulkDeleteModal" tabindex="-1" aria-labelledby="equipmentBulkDeleteModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="equipmentBulkDeleteModalLabel">Удалить выбранное оборудование?</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          Выбранные единицы оборудования будут удалены. Действие нельзя отменить через интерфейс.
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button class="btn btn-danger" type="submit" form="equipmentBulkDeleteForm">Удалить</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const selectAll = document.getElementById("equipmentSelectAll");
+      const bulkDeleteButton = document.getElementById("equipmentBulkDeleteButton");
+      const checkboxes = Array.from(document.querySelectorAll(".equipment-row-checkbox"));
+
+      function updateBulkDeleteState() {
+        const checkedCount = checkboxes.filter((checkbox) => checkbox.checked).length;
+        if (bulkDeleteButton) {
+          bulkDeleteButton.disabled = checkedCount === 0;
+        }
+        if (selectAll) {
+          selectAll.checked = checkedCount > 0 && checkedCount === checkboxes.length;
+          selectAll.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+        }
+      }
+
+      if (selectAll) {
+        selectAll.addEventListener("change", function () {
+          checkboxes.forEach((checkbox) => {
+            checkbox.checked = selectAll.checked;
+          });
+          updateBulkDeleteState();
+        });
+      }
+
+      checkboxes.forEach((checkbox) => {
+        checkbox.addEventListener("change", updateBulkDeleteState);
+      });
+
+      updateBulkDeleteState();
+    });
+  </script>
+{% endif %}
 {% endblock %}

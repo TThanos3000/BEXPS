@@ -5,9 +5,16 @@
 <div class="card">
   <div class="card-body">
     <h1 class="h4 mb-2">Приглашение создано</h1>
-    <p class="text-secondary">
-      Ссылка действует до {{ invitation.expires_at }}. Email-рассылка пока не настроена, ссылку можно передать сотруднику вручную.
-    </p>
+    {% if email_sent %}
+      <div class="alert alert-success">
+        Письмо с приглашением отправлено. Также вы можете скопировать ссылку вручную.
+      </div>
+    {% else %}
+      <div class="alert alert-warning">
+        Приглашение создано, но письмо не удалось отправить. Скопируйте ссылку и отправьте ее вручную.
+      </div>
+    {% endif %}
+    <p class="text-secondary">Ссылка действует до {{ invitation.expires_at }}.</p>
     <label class="form-label" for="inviteUrl">Ссылка приглашения</label>
     <input class="form-control mb-3" id="inviteUrl" value="{{ invite_url }}" readonly>
     <a class="btn btn-primary" href="{% url 'parmodels:users_list' %}">К пользователям</a>

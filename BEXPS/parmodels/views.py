@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from datetime import timedelta
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -8,6 +9,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model, logout
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Count, Q, Sum
 from django.http import JsonResponse
@@ -54,9 +56,14 @@ from .permissions import (
 )
 from .services import (
     CURRENT_ORGANIZATION_SESSION_KEY,
+    build_cache_key,
+    cache_get_or_set,
     get_current_membership,
     get_current_organization as service_get_current_organization,
+    send_organization_invitation_email,
 )
+
+logger = logging.getLogger(__name__)
 
 STATUS_FALLBACK_LABELS = {
     "new": "Новая",
@@ -66,6 +73,11 @@ STATUS_FALLBACK_LABELS = {
     "cancelled": "Отменена",
 }
 DEFAULT_BADGE_COLOR = "#6c757d"
+DICTIONARY_CACHE_TIMEOUT = 300
+DASHBOARD_CACHE_TIMEOUT = 60
+LOCATIONS_TREE_CACHE_TIMEOUT = 60
+BIM_API_CACHE_TIMEOUT = 30
+USER_WORKLOAD_CACHE_TIMEOUT = 30
 
 
 def _flatten_locations(locations):
@@ -295,6 +307,56 @@ def _bim_task_payload(application):
     }
 
 
+def _ifc_value_as_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ifc_value_as_text(value, default=""):
+    if value is None:
+        return default
+    text = str(value).strip()
+    return text or default
+
+
+def _infer_ifc_location_type(name, parent):
+    normalized = name.lower()
+    if any(marker in normalized for marker in ("здание", "building")):
+        return Location.LocationType.BUILDING
+    if any(marker in normalized for marker in ("этаж", "floor", "storey", "story")):
+        return Location.LocationType.FLOOR
+    if any(marker in normalized for marker in ("зона", "zone")):
+        return Location.LocationType.ZONE
+    if any(marker in normalized for marker in ("помещение", "комната", "кабинет", "room", "space")):
+        return Location.LocationType.ROOM
+
+    parent_type = getattr(parent, "location_type", None)
+    if parent_type == Location.LocationType.BUILDING:
+        return Location.LocationType.FLOOR
+    if parent_type == Location.LocationType.FLOOR:
+        return Location.LocationType.ROOM
+    if parent_type == Location.LocationType.ROOM:
+        return Location.LocationType.ZONE
+    return Location.LocationType.ROOM
+
+
+def _get_or_create_location_model(location):
+    location_model = location.location_models.order_by("-updated_at", "-created_at").first()
+    if location_model:
+        model_json = location_model.model_json
+        if not isinstance(model_json, dict):
+            location_model.model_json = {}
+        return location_model
+
+    return LocationModel.objects.create(
+        location=location,
+        name=f"Техплан: {location.name}",
+        model_json={"objects": [], "metadata": {"source": "ifc_export"}},
+    )
+
+
 def _status_display(status):
     if not status:
         return "Без статуса"
@@ -309,9 +371,41 @@ def _safe_color(color_code):
     return DEFAULT_BADGE_COLOR
 
 
+def _cached_application_statuses():
+    return cache_get_or_set(
+        build_cache_key("dictionary", "global", "application_statuses", "v1"),
+        lambda: list(ApplicationStatus.objects.order_by("name", "code")),
+        DICTIONARY_CACHE_TIMEOUT,
+    )
+
+
+def _cached_application_priorities():
+    return cache_get_or_set(
+        build_cache_key("dictionary", "global", "application_priorities", "v1"),
+        lambda: list(ApplicationPriority.objects.order_by("weight", "name", "code")),
+        DICTIONARY_CACHE_TIMEOUT,
+    )
+
+
+def _cached_equipment_statuses():
+    return cache_get_or_set(
+        build_cache_key("dictionary", "global", "equipment_statuses", "v1"),
+        lambda: list(EquipmentStatus.objects.order_by("name", "code")),
+        DICTIONARY_CACHE_TIMEOUT,
+    )
+
+
+def _cached_equipment_types():
+    return cache_get_or_set(
+        build_cache_key("dictionary", "global", "equipment_types", "v1"),
+        lambda: list(EquipmentType.objects.order_by("name", "code")),
+        DICTIONARY_CACHE_TIMEOUT,
+    )
+
+
 def _application_status_groups(queryset=None):
     base_queryset = queryset if queryset is not None else Application.objects.all()
-    statuses = ApplicationStatus.objects.order_by("name", "code")
+    statuses = _cached_application_statuses()
     groups = [
         {
             "status": status,
@@ -378,6 +472,76 @@ def dashboard(request):
                 .order_by("deadline", "-created_at")[:6]
             )
         )
+    show_team_load = bool(
+        current_membership
+        and current_membership.role
+        in (
+            OrganizationMembership.Role.ADMIN,
+            OrganizationMembership.Role.DISPATCHER,
+            OrganizationMembership.Role.CHIEF_ENGINEER,
+        )
+    )
+
+    def build_dashboard_stats():
+        team_load = 0
+        team_load_percent = 0
+        team_load_bar_class = "bg-success"
+        engineers_count = 0
+        max_capacity = 0
+        if show_team_load:
+            engineer_user_ids = list(
+                OrganizationMembership.objects
+                .filter(
+                    organization=organization,
+                    status=OrganizationMembership.Status.ACTIVE,
+                    role=OrganizationMembership.Role.ENGINEER,
+                )
+                .values_list("user_id", flat=True)
+            )
+            engineers_count = len(engineer_user_ids)
+            max_capacity = engineers_count * 100
+            team_applications = (
+                applications
+                .filter(executor_id__in=engineer_user_ids)
+                .filter(active_filter)
+            )
+            if priority_has_weight:
+                team_load = team_applications.aggregate(total=Sum("priority__weight"))["total"] or 0
+            if max_capacity:
+                raw_percent = (team_load / max_capacity) * 100
+                team_load_percent = min(int(raw_percent), 100)
+                if raw_percent >= 100:
+                    team_load_bar_class = "bg-danger"
+                elif raw_percent >= 60:
+                    team_load_bar_class = "bg-warning"
+
+        return {
+            "applications_count": applications.count(),
+            "active_applications_count": applications.filter(active_filter).count(),
+            "completed_applications_count": applications.filter(completed_filter).count(),
+            "locations_count": Location.objects.filter(organization=organization).count(),
+            "equipment_count": Equipment.objects.filter(organization=organization).count(),
+            "users_count": OrganizationMembership.objects.filter(
+                organization=organization,
+                status=OrganizationMembership.Status.ACTIVE,
+            ).count(),
+            "engineers_count": engineers_count,
+            "team_load": int(team_load),
+            "max_capacity": max_capacity,
+            "team_load_percent": team_load_percent,
+            "team_load_bar_class": team_load_bar_class,
+        }
+
+    dashboard_stats = cache_get_or_set(
+        build_cache_key(
+            "dashboard_stats",
+            organization.id,
+            current_membership.role if current_membership else "anonymous",
+            "v1",
+        ),
+        build_dashboard_stats,
+        DASHBOARD_CACHE_TIMEOUT,
+    )
     problematic_locations = (
         Location.objects
         .filter(organization=organization)
@@ -391,68 +555,15 @@ def dashboard(request):
         .filter(active_applications_count__gt=3)
         .order_by("-active_applications_count", "name")[:8]
     )
-    show_team_load = bool(
-        current_membership
-        and current_membership.role
-        in (
-            OrganizationMembership.Role.ADMIN,
-            OrganizationMembership.Role.DISPATCHER,
-            OrganizationMembership.Role.CHIEF_ENGINEER,
-        )
-    )
-    team_load = 0
-    team_load_percent = 0
-    team_load_bar_class = "bg-success"
-    engineers_count = 0
-    max_capacity = 0
-    if show_team_load:
-        engineer_user_ids = list(
-            OrganizationMembership.objects
-            .filter(
-                organization=organization,
-                status=OrganizationMembership.Status.ACTIVE,
-                role=OrganizationMembership.Role.ENGINEER,
-            )
-            .values_list("user_id", flat=True)
-        )
-        engineers_count = len(engineer_user_ids)
-        max_capacity = engineers_count * 100
-        team_applications = (
-            applications
-            .filter(executor_id__in=engineer_user_ids)
-            .filter(active_filter)
-        )
-        if priority_has_weight:
-            team_load = team_applications.aggregate(total=Sum("priority__weight"))["total"] or 0
-        if max_capacity:
-            raw_percent = (team_load / max_capacity) * 100
-            team_load_percent = min(int(raw_percent), 100)
-            if raw_percent >= 100:
-                team_load_bar_class = "bg-danger"
-            elif raw_percent >= 60:
-                team_load_bar_class = "bg-warning"
 
     context = {
         "current_organization": organization,
         **permission_flags(request.user, request=request),
-        "applications_count": applications.count(),
-        "active_applications_count": applications.filter(active_filter).count(),
-        "completed_applications_count": applications.filter(completed_filter).count(),
-        "locations_count": Location.objects.filter(organization=organization).count(),
-        "equipment_count": Equipment.objects.filter(organization=organization).count(),
-        "users_count": OrganizationMembership.objects.filter(
-            organization=organization,
-            status=OrganizationMembership.Status.ACTIVE,
-        ).count(),
+        **dashboard_stats,
         "show_my_tasks": show_my_tasks,
         "my_tasks": my_tasks,
         "problematic_locations": problematic_locations,
         "show_team_load": show_team_load,
-        "engineers_count": engineers_count,
-        "team_load": int(team_load),
-        "max_capacity": max_capacity,
-        "team_load_percent": team_load_percent,
-        "team_load_bar_class": team_load_bar_class,
         "priority_has_weight": priority_has_weight,
     }
     return render(request, "dashboard.html", context)
@@ -544,8 +655,8 @@ def applications_list(request):
     applications = _mark_deadline_state(
         list(filtered_applications.exclude(completed_status_filter))
     )
-    statuses = ApplicationStatus.objects.order_by("name", "code")
-    priorities = ApplicationPriority.objects.order_by("weight", "name", "code")
+    statuses = _cached_application_statuses()
+    priorities = _cached_application_priorities()
     executors = _organization_users_queryset(organization)
     status_groups = _application_status_groups(filtered_applications)
     status_chart = {
@@ -790,11 +901,17 @@ def locations_list(request):
     elif equipment_presence == "no_equipment":
         locations = locations.filter(equipment_count=0)
 
+    location_nodes = cache_get_or_set(
+        build_cache_key("locations_tree", organization.id, "v1", params=request.GET),
+        lambda: _location_tree_rows(list(locations)),
+        LOCATIONS_TREE_CACHE_TIMEOUT,
+    )
+
     return render(
         request,
         "locations_list.html",
         {
-            "location_nodes": _location_tree_rows(list(locations)),
+            "location_nodes": location_nodes,
             "q": q,
             "equipment_presence": equipment_presence,
             **permission_flags(request.user, request=request),
@@ -1012,6 +1129,194 @@ def bim_location_model_data(request, location_id: int):
 
 
 @login_required
+@ensure_csrf_cookie
+@require_POST
+def bim_ifc_export_api(request):
+    organization = _get_current_organization(request)
+    if organization is None:
+        return _json_access_denied()
+    require_permission(request.user, "locations.update", request=request)
+    require_permission(request.user, "equipment.update", request=request)
+
+    location_id = _ifc_value_as_int(request.GET.get("location_id"))
+    if location_id is None:
+        return _json_access_denied("Не указан location_id", status=400)
+
+    root_location = get_object_or_404(Location, id=location_id, organization=organization)
+
+    try:
+        payload = json.loads(request.body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        return _json_access_denied("Некорректный JSON экспорта IFC", status=400)
+
+    if not isinstance(payload, dict):
+        return _json_access_denied("Данные экспорта IFC должны быть объектом", status=400)
+
+    children = payload.get("children", [])
+    objects = payload.get("objects", [])
+    if not isinstance(children, list) or not isinstance(objects, list):
+        return _json_access_denied("Поля children и objects должны быть списками", status=400)
+
+    with transaction.atomic():
+        location_model = _get_or_create_location_model(root_location)
+        model_json = location_model.model_json if isinstance(location_model.model_json, dict) else {}
+        ifc_export = model_json.get("ifc_export")
+        if not isinstance(ifc_export, dict):
+            ifc_export = {}
+            model_json["ifc_export"] = ifc_export
+        location_map = {
+            str(key): value
+            for key, value in ifc_export.get("locations", {}).items()
+            if _ifc_value_as_int(value) is not None
+        }
+        object_map = {
+            str(key): value
+            for key, value in ifc_export.get("objects", {}).items()
+            if _ifc_value_as_int(value) is not None
+        }
+
+        imported_locations_by_express_id = {}
+        for express_id, bexps_location_id in location_map.items():
+            location = Location.objects.filter(
+                id=bexps_location_id,
+                organization=organization,
+            ).first()
+            if location:
+                imported_locations_by_express_id[express_id] = location
+
+        normalized_children = []
+        for raw_location in children:
+            if not isinstance(raw_location, dict):
+                continue
+            express_id = _ifc_value_as_int(raw_location.get("bim_location_id"))
+            if express_id is None:
+                continue
+            normalized_children.append(
+                {
+                    "express_id": express_id,
+                    "parent_express_id": _ifc_value_as_int(raw_location.get("parent_bim_location_id")) or 0,
+                    "name": _ifc_value_as_text(raw_location.get("name_location"), default=f"IFC локация {express_id}"),
+                }
+            )
+
+        created_locations = 0
+        updated_locations = 0
+        pending_locations = normalized_children[:]
+        while pending_locations:
+            next_pending = []
+            processed_in_pass = 0
+            for item in pending_locations:
+                express_key = str(item["express_id"])
+                parent_express_key = str(item["parent_express_id"])
+                parent = imported_locations_by_express_id.get(parent_express_key) or root_location
+                if item["parent_express_id"] and parent_express_key not in imported_locations_by_express_id:
+                    next_pending.append(item)
+                    continue
+
+                location = imported_locations_by_express_id.get(express_key)
+                defaults = {
+                    "organization": organization,
+                    "name": item["name"],
+                    "parent": parent,
+                    "location_type": _infer_ifc_location_type(item["name"], parent),
+                    "description": "Импортировано из IFC",
+                }
+                if location:
+                    for field, value in defaults.items():
+                        setattr(location, field, value)
+                    location.save()
+                    updated_locations += 1
+                else:
+                    location = Location.objects.create(**defaults)
+                    created_locations += 1
+
+                imported_locations_by_express_id[express_key] = location
+                location_map[express_key] = location.id
+                processed_in_pass += 1
+
+            if not processed_in_pass:
+                for item in next_pending:
+                    express_key = str(item["express_id"])
+                    parent = root_location
+                    location = imported_locations_by_express_id.get(express_key)
+                    defaults = {
+                        "organization": organization,
+                        "name": item["name"],
+                        "parent": parent,
+                        "location_type": _infer_ifc_location_type(item["name"], parent),
+                        "description": "Импортировано из IFC",
+                    }
+                    if location:
+                        for field, value in defaults.items():
+                            setattr(location, field, value)
+                        location.save()
+                        updated_locations += 1
+                    else:
+                        location = Location.objects.create(**defaults)
+                        created_locations += 1
+                    imported_locations_by_express_id[express_key] = location
+                    location_map[express_key] = location.id
+                break
+            pending_locations = next_pending
+
+        created_equipment = 0
+        updated_equipment = 0
+        for raw_object in objects:
+            if not isinstance(raw_object, dict):
+                continue
+            express_id = _ifc_value_as_int(raw_object.get("equipment_id"))
+            if express_id is None:
+                continue
+            name = _ifc_value_as_text(raw_object.get("name_equipment"), default=f"IFC оборудование {express_id}")
+            location_express_key = str(_ifc_value_as_int(raw_object.get("bim_location_id")) or "")
+            location = imported_locations_by_express_id.get(location_express_key) or root_location
+            external_id = f"ifc:{express_id}"
+            equipment = (
+                Equipment.objects
+                .filter(organization=organization, external_id=external_id)
+                .order_by("id")
+                .first()
+            )
+            defaults = {
+                "organization": organization,
+                "location": location,
+                "name_equipment": name,
+                "about": "Импортировано из IFC",
+                "inventory_number": f"IFC-{express_id}",
+                "external_id": external_id,
+            }
+            if equipment:
+                for field, value in defaults.items():
+                    setattr(equipment, field, value)
+                equipment.save()
+                updated_equipment += 1
+            else:
+                equipment = Equipment.objects.create(**defaults)
+                created_equipment += 1
+            object_map[str(express_id)] = equipment.id
+
+        ifc_export["source"] = "inwors"
+        ifc_export["root_location_id"] = root_location.id
+        ifc_export["locations"] = location_map
+        ifc_export["objects"] = object_map
+        ifc_export["last_payload_name"] = _ifc_value_as_text(payload.get("name"), default="IFC Structure")
+        ifc_export["updated_at"] = timezone.now().isoformat()
+        location_model.model_json = model_json
+        location_model.save()
+
+    return JsonResponse(
+        {
+            "status": "success",
+            "created_locations": created_locations,
+            "updated_locations": updated_locations,
+            "created_equipment": created_equipment,
+            "updated_equipment": updated_equipment,
+            "location_model_id": location_model.id,
+        }
+    )
+
+
+@login_required
 @require_GET
 def bim_locations_api(request):
     organization = _get_current_organization(request)
@@ -1035,7 +1340,12 @@ def bim_locations_api(request):
         else:
             locations = locations.filter(parent_id=parent_id)
 
-    return _bim_response([_bim_location_payload(location) for location in locations])
+    data = cache_get_or_set(
+        build_cache_key("bim_locations", organization.id, "v1", params=request.GET),
+        lambda: [_bim_location_payload(location) for location in locations],
+        BIM_API_CACHE_TIMEOUT,
+    )
+    return _bim_response(data)
 
 
 @login_required
@@ -1062,7 +1372,12 @@ def bim_objects_api(request):
         else:
             equipment = equipment.filter(location_id=parent_id)
 
-    return _bim_response([_bim_equipment_payload(item) for item in equipment])
+    data = cache_get_or_set(
+        build_cache_key("bim_objects", organization.id, "v1", params=request.GET),
+        lambda: [_bim_equipment_payload(item) for item in equipment],
+        BIM_API_CACHE_TIMEOUT,
+    )
+    return _bim_response(data)
 
 
 @login_required
@@ -1086,7 +1401,12 @@ def bim_tasks_api(request):
     if object_id not in (None, ""):
         applications = applications.filter(equipment_id=object_id)
 
-    return _bim_response([_bim_task_payload(application) for application in applications])
+    data = cache_get_or_set(
+        build_cache_key("bim_tasks", organization.id, "v1", params=request.GET),
+        lambda: [_bim_task_payload(application) for application in applications],
+        BIM_API_CACHE_TIMEOUT,
+    )
+    return _bim_response(data)
 
 
 @login_required
@@ -1096,6 +1416,14 @@ def equipment_list(request):
         return _organization_access_denied(request)
     require_permission(request.user, "equipment.view", request=request)
     q = (request.GET.get("q") or "").strip()
+    per_page_options = [10, 25, 50, 100]
+    try:
+        per_page = int(request.GET.get("per_page", 10))
+    except (TypeError, ValueError):
+        per_page = 10
+    if per_page not in per_page_options:
+        per_page = 10
+
     equipment = (
         Equipment.objects
         .filter(organization=organization)
@@ -1110,8 +1438,8 @@ def equipment_list(request):
             | Q(external_id__icontains=q)
         )
 
-    statuses = EquipmentStatus.objects.order_by("name", "code")
-    types = EquipmentType.objects.order_by("name", "code")
+    statuses = _cached_equipment_statuses()
+    types = _cached_equipment_types()
     status_groups = [
         {"status": status, "count": equipment.filter(status=status).count()}
         for status in statuses
@@ -1120,12 +1448,39 @@ def equipment_list(request):
         {"type": equipment_type, "count": equipment.filter(type_equipment=equipment_type).count()}
         for equipment_type in types
     ]
+    paginator = Paginator(equipment, per_page)
+    page_obj = paginator.get_page(request.GET.get("page"))
+    page_numbers = []
+    last_page_number = 0
+    for page_number in paginator.page_range:
+        if (
+            page_number == 1
+            or page_number == paginator.num_pages
+            or abs(page_number - page_obj.number) <= 2
+        ):
+            if last_page_number and page_number - last_page_number > 1:
+                page_numbers.append(None)
+            page_numbers.append(page_number)
+            last_page_number = page_number
+    pagination_query = request.GET.copy()
+    pagination_query.pop("page", None)
+    pagination_query["per_page"] = str(per_page)
+    pagination_querystring = pagination_query.urlencode()
+    pagination_prefix = f"{pagination_querystring}&" if pagination_querystring else ""
 
     return render(
         request,
         "equipment_list.html",
         {
-            "equipment": equipment,
+            "equipment": page_obj.object_list,
+            "page_obj": page_obj,
+            "paginator": paginator,
+            "per_page": per_page,
+            "per_page_options": per_page_options,
+            "page_numbers": page_numbers,
+            "pagination_querystring": pagination_querystring,
+            "pagination_prefix": pagination_prefix,
+            "current_querystring": request.GET.urlencode(),
             "statuses": statuses,
             "types": types,
             "status_groups": status_groups,
@@ -1372,6 +1727,36 @@ def equipment_delete(request, equipment_id: int):
 
 
 @login_required
+@require_POST
+def equipment_bulk_delete(request):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    require_permission(request.user, "equipment.delete", request=request)
+
+    redirect_query = request.POST.get("redirect_query", "")
+    redirect_url = reverse("parmodels:equipment_list")
+    if redirect_query:
+        redirect_url = f"{redirect_url}?{redirect_query}"
+
+    equipment_ids = request.POST.getlist("equipment_ids")
+    if not equipment_ids:
+        messages.warning(request, "Выберите оборудование для удаления.")
+        return redirect(redirect_url)
+
+    queryset = Equipment.objects.filter(id__in=equipment_ids, organization=organization)
+    deleted_count = queryset.count()
+    queryset.delete()
+
+    if deleted_count:
+        messages.success(request, f"Удалено оборудования: {deleted_count}.")
+    else:
+        messages.warning(request, "Выбранное оборудование не найдено или недоступно.")
+
+    return redirect(redirect_url)
+
+
+@login_required
 def location_delete_confirm(request, location_id: int):
     organization = _require_current_organization(request)
     if organization is None:
@@ -1468,19 +1853,22 @@ def users_list(request):
 
     departments = Department.objects.filter(organization=organization).order_by("name")
     memberships = list(memberships)
-    user_ids = [item.user_id for item in memberships]
     priority_has_weight = _application_priority_has_weight()
     if priority_has_weight:
-        workload_by_user = {
-            row["executor_id"]: row["workload"] or 0
-            for row in (
-                Application.objects
-                .filter(organization=organization, executor_id__in=user_ids)
-                .filter(_active_application_filter())
-                .values("executor_id")
-                .annotate(workload=Sum("priority__weight"))
-            )
-        }
+        workload_by_user = cache_get_or_set(
+            build_cache_key("users_workload", organization.id, "v1"),
+            lambda: {
+                row["executor_id"]: row["workload"] or 0
+                for row in (
+                    Application.objects
+                    .filter(organization=organization, executor__isnull=False)
+                    .filter(_active_application_filter())
+                    .values("executor_id")
+                    .annotate(workload=Sum("priority__weight"))
+                )
+            },
+            USER_WORKLOAD_CACHE_TIMEOUT,
+        )
     else:
         workload_by_user = {}
     for item in memberships:
@@ -1537,10 +1925,33 @@ def organization_invitation_create(request):
             invite_url = request.build_absolute_uri(
                 reverse("parmodels:organization_invitation_accept", args=[invitation.token])
             )
+            email_sent = False
+            try:
+                email_sent = send_organization_invitation_email(invitation, invite_url) > 0
+            except Exception:
+                logger.exception(
+                    "Failed to send organization invitation email to %s",
+                    invitation.email,
+                )
+
+            if email_sent:
+                messages.success(
+                    request,
+                    "Письмо с приглашением отправлено. Также вы можете скопировать ссылку вручную.",
+                )
+            else:
+                messages.warning(
+                    request,
+                    "Приглашение создано, но письмо не удалось отправить. Скопируйте ссылку и отправьте ее вручную.",
+                )
             return render(
                 request,
                 "organization_invitation_done.html",
-                {"invitation": invitation, "invite_url": invite_url},
+                {
+                    "invitation": invitation,
+                    "invite_url": invite_url,
+                    "email_sent": email_sent,
+                },
             )
     else:
         form = OrganizationInvitationForm(organization=organization)
