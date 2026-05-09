@@ -31,9 +31,59 @@
       <dd class="col-sm-9">{{ location.parent.name|default:"—" }}</dd>
       <dt class="col-sm-3">Адрес</dt>
       <dd class="col-sm-9">{{ location.address_location|default:"—" }}</dd>
+      <dt class="col-sm-3">Координаты</dt>
+      <dd class="col-sm-9">
+        {% if yandex_map_data %}
+          {{ location.latitude }}, {{ location.longitude }}
+        {% else %}
+          —
+        {% endif %}
+      </dd>
       <dt class="col-sm-3">Описание</dt>
       <dd class="col-sm-9">{{ location.description|default:"—" }}</dd>
     </dl>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Карта</h2>
+    {% if yandex_map_data and yandex_maps_api_key %}
+      <div id="locationYandexMap" class="w-100 rounded border" style="height: 380px;"></div>
+      {{ yandex_map_data|json_script:"location-yandex-map-data" }}
+      <script src="https://api-maps.yandex.ru/2.1/?apikey={{ yandex_maps_api_key|urlencode }}&lang=ru_RU"></script>
+      <script>
+        ymaps.ready(function () {
+          const mapData = JSON.parse(document.getElementById("location-yandex-map-data").textContent);
+          const coordinates = [mapData.latitude, mapData.longitude];
+          const map = new ymaps.Map("locationYandexMap", {
+            center: coordinates,
+            zoom: 16,
+            controls: ["zoomControl", "fullscreenControl"]
+          });
+          const placemark = new ymaps.Placemark(
+            coordinates,
+            {
+              hintContent: mapData.name,
+              balloonContentHeader: mapData.name,
+              balloonContentBody: mapData.address || "Адрес не указан"
+            },
+            {
+              preset: "islands#blueDotIcon"
+            }
+          );
+          map.geoObjects.add(placemark);
+        });
+      </script>
+    {% elif yandex_map_data %}
+      <div class="alert alert-warning mb-0">
+        Координаты локации определены, но ключ Яндекс JavaScript API не настроен.
+      </div>
+    {% else %}
+      <div class="alert alert-light border mb-0">
+        Не удалось определить координаты локации.
+      </div>
+    {% endif %}
   </div>
 </div>
 

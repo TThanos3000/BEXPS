@@ -44,4 +44,35 @@
   </div>
 </div>
 
+{% if yandex_maps_api_key and yandex_suggest_api_key and form.address_location %}
+  <script>
+    (function () {
+      window.initLocationAddressSuggest = function () {
+        const addressField = document.getElementById("{{ form.address_location.id_for_label }}");
+        if (!addressField || !window.ymaps || !window.ymaps.SuggestView) {
+          return;
+        }
+
+        try {
+          const suggestView = new window.ymaps.SuggestView(addressField, {
+            results: 6
+          });
+          suggestView.events.add("select", function (event) {
+            const item = event.get("item");
+            if (item && item.value) {
+              addressField.value = item.value;
+            }
+          });
+        } catch (error) {
+          console.warn("Yandex address suggest is unavailable", error);
+        }
+      };
+    })();
+  </script>
+  <script
+    src="https://api-maps.yandex.ru/2.1/?lang=ru_RU&load=SuggestView&apikey={{ yandex_maps_api_key|urlencode }}&suggest_apikey={{ yandex_suggest_api_key|urlencode }}&onload=initLocationAddressSuggest"
+    onerror="console.warn('Yandex address suggest script failed to load')"
+  ></script>
+{% endif %}
+
 {% endblock %}

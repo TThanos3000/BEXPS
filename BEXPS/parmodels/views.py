@@ -58,6 +58,7 @@ from .services import (
     CURRENT_ORGANIZATION_SESSION_KEY,
     build_cache_key,
     cache_get_or_set,
+    geocode_yandex_address,
     get_current_membership,
     get_current_organization as service_get_current_organization,
     send_organization_invitation_email,
@@ -355,6 +356,27 @@ def _get_or_create_location_model(location):
         name=f"Техплан: {location.name}",
         model_json={"objects": [], "metadata": {"source": "ifc_export"}},
     )
+
+
+def _apply_location_geocoding(location, *, force=False):
+    address = (location.address_location or "").strip()
+    if not address:
+        location.latitude = None
+        location.longitude = None
+        return True
+
+    needs_geocoding = force or location.latitude is None or location.longitude is None
+    if not needs_geocoding:
+        return True
+
+    coordinates = geocode_yandex_address(address)
+    if not coordinates:
+        location.latitude = None
+        location.longitude = None
+        return False
+
+    location.latitude, location.longitude = coordinates
+    return True
 
 
 def _status_display(status):
@@ -943,6 +965,14 @@ def location_detail_standalone(request, location_id: int):
         .order_by("name_equipment", "inventory_number")
     )
     location_models = location.location_models.order_by("-created_at")
+    yandex_map_data = None
+    if location.latitude is not None and location.longitude is not None:
+        yandex_map_data = {
+            "latitude": float(location.latitude),
+            "longitude": float(location.longitude),
+            "name": location.name,
+            "address": location.address_location,
+        }
     return render(
         request,
         "location_detail_standalone.html",
@@ -952,6 +982,8 @@ def location_detail_standalone(request, location_id: int):
             "location_models": location_models,
             "has_location_model": location_models.exists(),
             "equipment": equipment,
+            "yandex_maps_api_key": settings.YANDEX_MAPS_API_KEY,
+            "yandex_map_data": yandex_map_data,
             **permission_flags(request.user, request=request),
         },
     )
@@ -980,7 +1012,13 @@ def location_create_standalone(request):
         if form.is_valid():
             location = form.save(commit=False)
             location.organization = current_organization
+            geocoded = _apply_location_geocoding(location, force=True)
             location.save()
+            if not geocoded:
+                messages.warning(
+                    request,
+                    "Локация сохранена, но координаты по адресу определить не удалось.",
+                )
             messages.success(request, "Локация создана")
             return redirect("parmodels:location_detail_standalone", location_id=location.id)
     else:
@@ -1000,6 +1038,8 @@ def location_create_standalone(request):
             "mode": "create",
             "title": "Новая локация",
             "cancel_url": "parmodels:locations_list",
+            "yandex_maps_api_key": settings.YANDEX_MAPS_API_KEY,
+            "yandex_suggest_api_key": settings.YANDEX_SUGGEST_API_KEY,
         },
     )
 
@@ -1011,11 +1051,20 @@ def location_edit_standalone(request, location_id: int):
         return _organization_access_denied(request)
     require_permission(request.user, "locations.update", request=request)
     location = get_object_or_404(Location, id=location_id, organization=organization)
+    previous_address = location.address_location
 
     if request.method == "POST":
         form = LocationForm(request.POST, instance=location, hide_organization=True, organization=organization)
         if form.is_valid():
-            location = form.save()
+            location = form.save(commit=False)
+            address_changed = previous_address != location.address_location
+            geocoded = _apply_location_geocoding(location, force=address_changed)
+            location.save()
+            if not geocoded:
+                messages.warning(
+                    request,
+                    "Локация сохранена, но координаты по адресу определить не удалось.",
+                )
             messages.success(request, "Локация обновлена")
             return redirect("parmodels:location_detail_standalone", location_id=location.id)
     else:
@@ -1040,6 +1089,8 @@ def location_edit_standalone(request, location_id: int):
             "title": "Редактирование локации",
             "cancel_url": "parmodels:location_detail_standalone",
             "cancel_url_arg": location.id,
+            "yandex_maps_api_key": settings.YANDEX_MAPS_API_KEY,
+            "yandex_suggest_api_key": settings.YANDEX_SUGGEST_API_KEY,
         },
     )
 

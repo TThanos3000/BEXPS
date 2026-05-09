@@ -65,7 +65,13 @@ class LocationForm(forms.ModelForm):
             "name": forms.TextInput(attrs={"class": "form-control"}),
             "location_type": forms.Select(attrs={"class": "form-select"}),
             "description": forms.Textarea(attrs={"class": "form-control", "rows": 4}),
-            "address_location": forms.Textarea(attrs={"class": "form-control", "rows": 3}),
+            "address_location": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "autocomplete": "off",
+                    "placeholder": "Начните вводить адрес",
+                }
+            ),
         }
 
     def __init__(self, *args, **kwargs):

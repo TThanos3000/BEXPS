@@ -50,7 +50,7 @@ class OrganizationMembershipAdminForm(forms.ModelForm):
 
 @admin.register(Location)
 class LocationAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "location_type", "organization", "parent")
+    list_display = ("id", "name", "location_type", "organization", "parent", "latitude", "longitude")
     list_filter = ("organization", "location_type")
     search_fields = ("name", "description", "address_location", "organization__name", "parent__name")
     autocomplete_fields = ("organization", "parent")

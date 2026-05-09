@@ -1,8 +1,11 @@
 CURRENT_ORGANIZATION_SESSION_KEY = "current_organization_id"
 
 import hashlib
+import logging
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
+import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.core.mail import send_mail
@@ -11,6 +14,7 @@ from django.template.loader import render_to_string
 from .models import OrganizationMembership
 
 _CACHE_MISSING = object()
+logger = logging.getLogger(__name__)
 
 
 def build_cache_key(namespace, organization_id, *parts, params=None):
@@ -40,6 +44,48 @@ def cache_get_or_set(key, factory, timeout):
     value = factory()
     cache.set(key, value, timeout)
     return value
+
+
+def geocode_yandex_address(address):
+    address = (address or "").strip()
+    if not address or not settings.YANDEX_GEOCODER_API_KEY:
+        return None
+
+    try:
+        response = requests.get(
+            "https://geocode-maps.yandex.ru/1.x/",
+            params={
+                "apikey": settings.YANDEX_GEOCODER_API_KEY,
+                "geocode": address,
+                "format": "json",
+                "results": 1,
+            },
+            timeout=settings.YANDEX_GEOCODER_TIMEOUT,
+        )
+        response.raise_for_status()
+        data = response.json()
+        feature_members = (
+            data
+            .get("response", {})
+            .get("GeoObjectCollection", {})
+            .get("featureMember", [])
+        )
+        if not feature_members:
+            return None
+
+        pos = (
+            feature_members[0]
+            .get("GeoObject", {})
+            .get("Point", {})
+            .get("pos", "")
+        )
+        longitude_raw, latitude_raw = pos.split()
+        latitude = Decimal(latitude_raw).quantize(Decimal("0.000001"))
+        longitude = Decimal(longitude_raw).quantize(Decimal("0.000001"))
+        return latitude, longitude
+    except (requests.RequestException, ValueError, KeyError, InvalidOperation) as exc:
+        logger.warning("Yandex geocoding failed for address '%s': %s", address, exc)
+        return None
 
 
 def get_current_membership(user, request=None):

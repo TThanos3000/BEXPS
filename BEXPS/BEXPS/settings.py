@@ -164,6 +164,11 @@ EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = config("EMAIL_USE_TLS", default=False, cast=bool)
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="BEXPS <noreply@bexps.local>")
 
+YANDEX_MAPS_API_KEY = config("YANDEX_MAPS_API_KEY", default="")
+YANDEX_GEOCODER_API_KEY = config("YANDEX_GEOCODER_API_KEY", default="")
+YANDEX_SUGGEST_API_KEY = config("YANDEX_SUGGEST_API_KEY", default="")
+YANDEX_GEOCODER_TIMEOUT = config("YANDEX_GEOCODER_TIMEOUT", default=5, cast=int)
+
 REDIS_URL = config("REDIS_URL", default="redis://127.0.0.1:6379/1")
 
 CACHES = {
