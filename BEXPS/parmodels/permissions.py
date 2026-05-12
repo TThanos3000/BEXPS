@@ -105,17 +105,21 @@ def require_application_status_permission(user, application, request=None):
 def permission_flags(user, request=None):
     permissions = get_user_permissions(user, request=request)
     return {
+        "can_view_application": "applications.view" in permissions,
         "can_create_application": "applications.create" in permissions,
         "can_update_application": "applications.update" in permissions,
         "can_delete_application": "applications.delete" in permissions,
         "can_update_application_status": "applications.update_status" in permissions,
+        "can_view_location": "locations.view" in permissions,
         "can_create_location": "locations.create" in permissions,
         "can_update_location": "locations.update" in permissions,
         "can_delete_location": "locations.delete" in permissions,
         "can_create_location_model": "locations.update" in permissions,
+        "can_view_equipment": "equipment.view" in permissions,
         "can_create_equipment": "equipment.create" in permissions,
         "can_update_equipment": "equipment.update" in permissions,
         "can_delete_equipment": "equipment.delete" in permissions,
         "can_update_equipment_status": "equipment.update_status" in permissions,
+        "can_view_users": "users.view" in permissions,
         "can_invite_users": "users.invite" in permissions,
     }

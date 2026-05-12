@@ -1,7 +1,6 @@
-CURRENT_ORGANIZATION_SESSION_KEY = "current_organization_id"
-
 import hashlib
 import logging
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode
 
@@ -9,10 +8,17 @@ import requests
 from django.conf import settings
 from django.core.cache import cache
 from django.core.mail import send_mail
+from django.http import HttpResponse
 from django.template.loader import render_to_string
+from django.utils import timezone
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 from .models import OrganizationMembership
 
+CURRENT_ORGANIZATION_SESSION_KEY = "current_organization_id"
+XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _CACHE_MISSING = object()
 logger = logging.getLogger(__name__)
 
@@ -44,6 +50,45 @@ def cache_get_or_set(key, factory, timeout):
     value = factory()
     cache.set(key, value, timeout)
     return value
+
+
+def _format_xlsx_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        if timezone.is_aware(value):
+            value = timezone.localtime(value)
+        return value.strftime("%d.%m.%Y %H:%M")
+    if isinstance(value, date):
+        return value.strftime("%d.%m.%Y")
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def build_xlsx_response(filename, sheet_title, headers, rows):
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = (sheet_title or "Export")[:31]
+    worksheet.append(headers)
+
+    for cell in worksheet[1]:
+        cell.font = Font(bold=True)
+
+    column_widths = [len(str(header)) for header in headers]
+    for row in rows:
+        formatted_row = [_format_xlsx_value(value) for value in row]
+        worksheet.append(formatted_row)
+        for index, value in enumerate(formatted_row):
+            column_widths[index] = max(column_widths[index], len(str(value)))
+
+    for index, width in enumerate(column_widths, start=1):
+        worksheet.column_dimensions[get_column_letter(index)].width = min(max(width + 2, 12), 45)
+
+    response = HttpResponse(content_type=XLSX_CONTENT_TYPE)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    workbook.save(response)
+    return response
 
 
 def geocode_yandex_address(address):

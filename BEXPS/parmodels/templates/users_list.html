@@ -9,9 +9,17 @@
       Учетные записи и членство в организации{% if current_organization %}: {{ current_organization.name }}{% endif %}
     </div>
   </div>
-  {% if can_invite_users %}
-    <a class="btn btn-primary" href="{% url 'parmodels:organization_invitation_create' %}">Пригласить сотрудника</a>
-  {% endif %}
+  <div class="d-flex flex-wrap gap-2">
+    {% if can_view_users %}
+      <a class="btn btn-outline-success" href="{% url 'parmodels:users_export' %}{% if current_querystring %}?{{ current_querystring }}{% endif %}">
+        <i class="bi bi-file-earmark-excel" aria-hidden="true"></i>
+        Excel
+      </a>
+    {% endif %}
+    {% if can_invite_users %}
+      <a class="btn btn-primary" href="{% url 'parmodels:organization_invitation_create' %}">Пригласить сотрудника</a>
+    {% endif %}
+  </div>
 </div>
 
 <form method="get" class="row g-2 mb-3">

@@ -56,6 +56,7 @@ from .permissions import (
 )
 from .services import (
     CURRENT_ORGANIZATION_SESSION_KEY,
+    build_xlsx_response,
     build_cache_key,
     cache_get_or_set,
     geocode_yandex_address,
@@ -245,6 +246,33 @@ def _format_datetime(value):
 
 def _format_date(value):
     return value.isoformat() if value else ""
+
+
+def _format_export_datetime(value):
+    if not value:
+        return ""
+    if timezone.is_aware(value):
+        value = timezone.localtime(value)
+    return value.strftime("%d.%m.%Y %H:%M")
+
+
+def _user_display_name(user):
+    if not user:
+        return ""
+    return user.get_full_name() or user.email or user.username
+
+
+def _application_number(application):
+    created_at = application.date_create or application.created_at
+    return f"№{application.id} от {_format_export_datetime(created_at)}"
+
+
+def _user_phone(user):
+    return (
+        getattr(user, "phone_number", "")
+        or getattr(user, "phone", "")
+        or ""
+    )
 
 
 def _bim_location_payload(location):
@@ -702,6 +730,7 @@ def applications_list(request):
             "filter_errors": filter_errors,
             "invalid_deadline_range": invalid_deadline_range,
             "completed_applications_title": completed_applications_title,
+            "current_querystring": request.GET.urlencode(),
             **permission_flags(request.user, request=request),
             "filters": {
                 "status": status_id,
@@ -714,6 +743,130 @@ def applications_list(request):
                 "deadline_to": deadline_to,
             },
         },
+    )
+
+
+@login_required
+def applications_export(request):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    require_permission(request.user, "applications.view", request=request)
+
+    q = (request.GET.get("q") or "").strip()
+    status_id = (request.GET.get("status") or "").strip()
+    priority_id = (request.GET.get("priority") or "").strip()
+    executor_id = (request.GET.get("executor") or "").strip()
+    date_create_from_date = _parse_filter_date((request.GET.get("date_create_from") or "").strip())
+    date_create_to_date = _parse_filter_date((request.GET.get("date_create_to") or "").strip())
+    deadline_from = (request.GET.get("deadline_from") or "").strip()
+    deadline_to = (request.GET.get("deadline_to") or "").strip()
+    deadline_from_date = _parse_filter_date(deadline_from)
+    deadline_to_date = _parse_filter_date(deadline_to)
+    export_date_type = (request.GET.get("export_date_type") or "created").strip()
+    if export_date_type not in ("created", "deadline"):
+        export_date_type = "created"
+    export_date_from = (request.GET.get("export_date_from") or "").strip()
+    export_date_to = (request.GET.get("export_date_to") or "").strip()
+    export_date_from_date = _parse_filter_date(export_date_from)
+    export_date_to_date = _parse_filter_date(export_date_to)
+    invalid_export_date_range = bool(
+        export_date_from
+        and export_date_to
+        and export_date_from_date
+        and export_date_to_date
+        and export_date_from_date > export_date_to_date
+    )
+    if invalid_export_date_range:
+        messages.warning(request, "Неверный диапазон дат")
+        redirect_query = request.GET.copy()
+        for key in ("export_date_type", "export_date_from", "export_date_to", "page", "per_page"):
+            if key in redirect_query:
+                redirect_query.pop(key)
+        redirect_url = reverse("parmodels:applications_list")
+        querystring = redirect_query.urlencode()
+        if querystring:
+            redirect_url = f"{redirect_url}?{querystring}"
+        return redirect(redirect_url)
+
+    invalid_deadline_range = bool(
+        deadline_from
+        and deadline_to
+        and deadline_from_date
+        and deadline_to_date
+        and deadline_from_date > deadline_to_date
+    )
+    mine = (
+        (request.GET.get("mine") or "").strip() == "1"
+        or (request.GET.get("my_applications") or "").strip() == "1"
+    )
+
+    applications = (
+        Application.objects
+        .filter(organization=organization)
+        .select_related("organization", "location", "equipment", "executor", "priority", "status")
+        .order_by("-created_at")
+    )
+    if q:
+        search_query = Q(name_application__icontains=q) | Q(about__icontains=q)
+        if q.isdigit():
+            search_query |= Q(id=int(q))
+        applications = applications.filter(search_query)
+    if status_id:
+        applications = applications.filter(status_id=status_id)
+    if priority_id:
+        applications = applications.filter(priority_id=priority_id)
+    if executor_id:
+        applications = applications.filter(executor_id=executor_id)
+    if mine:
+        applications = applications.filter(executor=request.user)
+    if date_create_from_date:
+        applications = applications.filter(date_create__date__gte=date_create_from_date)
+    if date_create_to_date:
+        applications = applications.filter(date_create__date__lte=date_create_to_date)
+    if not invalid_deadline_range:
+        if deadline_from_date:
+            applications = applications.filter(deadline__date__gte=deadline_from_date)
+        if deadline_to_date:
+            applications = applications.filter(deadline__date__lte=deadline_to_date)
+    if export_date_from_date:
+        if export_date_type == "deadline":
+            applications = applications.filter(deadline__date__gte=export_date_from_date)
+        else:
+            applications = applications.filter(date_create__date__gte=export_date_from_date)
+    if export_date_to_date:
+        if export_date_type == "deadline":
+            applications = applications.filter(deadline__date__lte=export_date_to_date)
+        else:
+            applications = applications.filter(date_create__date__lte=export_date_to_date)
+
+    rows = [
+        (
+            _application_number(application),
+            application.name_application,
+            application.status.name if application.status else "",
+            application.priority.name if application.priority else "",
+            _user_display_name(application.executor),
+            application.deadline,
+            application.location.name if application.location else "",
+            application.equipment.name_equipment if application.equipment else "",
+        )
+        for application in applications
+    ]
+    return build_xlsx_response(
+        "applications_export.xlsx",
+        "Заявки",
+        [
+            "Номер заявки",
+            "Название",
+            "Статус",
+            "Приоритет",
+            "Исполнитель",
+            "Дедлайн",
+            "Локация",
+            "Оборудование",
+        ],
+        rows,
     )
 
 
@@ -936,8 +1089,62 @@ def locations_list(request):
             "location_nodes": location_nodes,
             "q": q,
             "equipment_presence": equipment_presence,
+            "current_querystring": request.GET.urlencode(),
             **permission_flags(request.user, request=request),
         },
+    )
+
+
+@login_required
+def locations_export(request):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    require_permission(request.user, "locations.view", request=request)
+
+    q = (request.GET.get("q") or "").strip()
+    equipment_presence = (request.GET.get("equipment_presence") or "").strip()
+    locations = (
+        Location.objects
+        .filter(organization=organization)
+        .select_related("organization", "parent")
+        .annotate(equipment_count=Count("equipment"))
+        .order_by("parent_id", "location_type", "name")
+    )
+    if q:
+        locations = locations.filter(
+            Q(name__icontains=q)
+            | Q(description__icontains=q)
+            | Q(location_type__icontains=q)
+        )
+    if equipment_presence == "has_equipment":
+        locations = locations.filter(equipment_count__gt=0)
+    elif equipment_presence == "no_equipment":
+        locations = locations.filter(equipment_count=0)
+
+    rows = [
+        (
+            location.name,
+            location.get_location_type_display(),
+            location.organization.name if location.organization else "",
+            location.parent.name if location.parent else "",
+            location.address_location,
+            location.equipment_count,
+        )
+        for location in locations
+    ]
+    return build_xlsx_response(
+        "locations_export.xlsx",
+        "Локации",
+        [
+            "Название",
+            "Тип",
+            "Организация",
+            "Родительская локация",
+            "Адрес",
+            "Количество оборудования",
+        ],
+        rows,
     )
 
 
@@ -965,6 +1172,7 @@ def location_detail_standalone(request, location_id: int):
         .order_by("name_equipment", "inventory_number")
     )
     location_models = location.location_models.order_by("-created_at")
+    current_location_model = location.location_models.order_by("-updated_at", "-created_at").first()
     yandex_map_data = None
     if location.latitude is not None and location.longitude is not None:
         yandex_map_data = {
@@ -980,7 +1188,8 @@ def location_detail_standalone(request, location_id: int):
             "location": location,
             "children": children,
             "location_models": location_models,
-            "has_location_model": location_models.exists(),
+            "current_location_model": current_location_model,
+            "has_location_model": current_location_model is not None,
             "equipment": equipment,
             "yandex_maps_api_key": settings.YANDEX_MAPS_API_KEY,
             "yandex_map_data": yandex_map_data,
@@ -1093,6 +1302,26 @@ def location_edit_standalone(request, location_id: int):
             "yandex_suggest_api_key": settings.YANDEX_SUGGEST_API_KEY,
         },
     )
+
+
+@login_required
+@require_POST
+def location_model_delete(request, location_id: int):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    require_permission(request.user, "locations.update", request=request)
+    location = get_object_or_404(Location, id=location_id, organization=organization)
+    location_model = location.location_models.order_by("-updated_at", "-created_at").first()
+
+    if location_model is None:
+        messages.warning(request, "Техплан для этой локации не найден.")
+        return redirect("parmodels:location_detail_standalone", location_id=location.id)
+
+    location_model_name = location_model.name
+    location_model.delete()
+    messages.success(request, f"Техплан удален: {location_model_name}")
+    return redirect("parmodels:location_detail_standalone", location_id=location.id)
 
 
 @login_required
@@ -1545,6 +1774,53 @@ def equipment_list(request):
 
 
 @login_required
+def equipment_export(request):
+    organization = _require_current_organization(request)
+    if organization is None:
+        return _organization_access_denied(request)
+    require_permission(request.user, "equipment.view", request=request)
+
+    q = (request.GET.get("q") or "").strip()
+    equipment = (
+        Equipment.objects
+        .filter(organization=organization)
+        .select_related("organization", "location", "status", "type_equipment")
+        .order_by("name_equipment", "inventory_number")
+    )
+    if q:
+        equipment = equipment.filter(
+            Q(name_equipment__icontains=q)
+            | Q(inventory_number__icontains=q)
+            | Q(external_id__icontains=q)
+        )
+
+    rows = [
+        (
+            item.name_equipment,
+            item.status.name if item.status else "",
+            item.type_equipment.name if item.type_equipment else "",
+            item.location.name if item.location else "",
+            item.organization.name if item.organization else "",
+            item.date_input,
+        )
+        for item in equipment
+    ]
+    return build_xlsx_response(
+        "equipment_export.xlsx",
+        "Оборудование",
+        [
+            "Название оборудования",
+            "Статус",
+            "Тип",
+            "Локация",
+            "Организация",
+            "Дата ввода в эксплуатацию",
+        ],
+        rows,
+    )
+
+
+@login_required
 def equipment_detail(request, equipment_id: int):
     organization = _require_current_organization(request)
     if organization is None:
@@ -1945,6 +2221,7 @@ def users_list(request):
             "filter_errors": filter_errors,
             "invalid_date_reception_range": invalid_date_reception_range,
             "priority_workload_uses_weight": priority_has_weight,
+            "current_querystring": request.GET.urlencode(),
             **permission_flags(request.user, request=request),
             "filters": {
                 "organization": organization_id,
@@ -1953,6 +2230,107 @@ def users_list(request):
                 "date_reception_to": date_reception_to,
             },
         },
+    )
+
+
+@login_required
+def users_export(request):
+    membership = get_current_membership(request.user, request=request)
+    if membership is None:
+        return _organization_access_denied(request)
+    require_permission(request.user, "users.view", request=request)
+    organization = membership.organization
+
+    q = (request.GET.get("q") or "").strip()
+    organization_id = (request.GET.get("organization") or "").strip()
+    department_id = (request.GET.get("department") or "").strip()
+    date_reception_from = (request.GET.get("date_reception_from") or "").strip()
+    date_reception_to = (request.GET.get("date_reception_to") or "").strip()
+    date_reception_from_date = _parse_filter_date(date_reception_from)
+    date_reception_to_date = _parse_filter_date(date_reception_to)
+    invalid_date_reception_range = bool(
+        date_reception_from
+        and date_reception_to
+        and date_reception_from_date
+        and date_reception_to_date
+        and date_reception_from_date > date_reception_to_date
+    )
+
+    memberships = (
+        OrganizationMembership.objects
+        .filter(organization=organization, status=OrganizationMembership.Status.ACTIVE)
+        .select_related("user", "organization", "department")
+        .order_by("user__last_name", "user__first_name", "user__email")
+    )
+    if q:
+        memberships = memberships.filter(
+            Q(user__first_name__icontains=q)
+            | Q(user__last_name__icontains=q)
+            | Q(user__email__icontains=q)
+            | Q(user__username__icontains=q)
+        )
+    if organization_id and organization_id != str(organization.id):
+        memberships = memberships.none()
+    if department_id:
+        memberships = memberships.filter(department_id=department_id)
+    if not invalid_date_reception_range:
+        if date_reception_from_date:
+            memberships = memberships.filter(date_reception__gte=date_reception_from_date)
+        if date_reception_to_date:
+            memberships = memberships.filter(date_reception__lte=date_reception_to_date)
+
+    priority_has_weight = _application_priority_has_weight()
+    if priority_has_weight:
+        workload_by_user = cache_get_or_set(
+            build_cache_key("users_workload", organization.id, "v1"),
+            lambda: {
+                row["executor_id"]: row["workload"] or 0
+                for row in (
+                    Application.objects
+                    .filter(organization=organization, executor__isnull=False)
+                    .filter(_active_application_filter())
+                    .values("executor_id")
+                    .annotate(workload=Sum("priority__weight"))
+                )
+            },
+            USER_WORKLOAD_CACHE_TIMEOUT,
+        )
+    else:
+        workload_by_user = {}
+
+    rows = []
+    for item in memberships:
+        user = item.user
+        workload = int(workload_by_user.get(item.user_id, 0))
+        rows.append(
+            (
+                user.first_name,
+                user.last_name,
+                user.email,
+                _user_phone(user),
+                item.organization.name if item.organization else "",
+                item.department.name if item.department else "",
+                item.position,
+                item.date_reception,
+                f"{workload}/100",
+            )
+        )
+
+    return build_xlsx_response(
+        "users_export.xlsx",
+        "Пользователи",
+        [
+            "Имя",
+            "Фамилия",
+            "Email",
+            "Телефон",
+            "Организация",
+            "Департамент",
+            "Должность",
+            "Дата выхода",
+            "Загрузка",
+        ],
+        rows,
     )
 
 

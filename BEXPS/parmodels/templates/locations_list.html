@@ -7,9 +7,17 @@
     <h1 class="h3 mb-1">Локации</h1>
     <div class="text-secondary">Иерархия объектов, этажей, помещений и зон</div>
   </div>
-  {% if can_create_location %}
-    <a class="btn btn-primary" href="{% url 'parmodels:location_create_standalone' %}">Добавить</a>
-  {% endif %}
+  <div class="d-flex flex-wrap gap-2">
+    {% if can_view_location %}
+      <a class="btn btn-outline-success" href="{% url 'parmodels:locations_export' %}{% if current_querystring %}?{{ current_querystring }}{% endif %}">
+        <i class="bi bi-file-earmark-excel" aria-hidden="true"></i>
+        Excel
+      </a>
+    {% endif %}
+    {% if can_create_location %}
+      <a class="btn btn-primary" href="{% url 'parmodels:location_create_standalone' %}">Добавить</a>
+    {% endif %}
+  </div>
 </div>
 
 <form method="get" class="row g-2 mb-3">

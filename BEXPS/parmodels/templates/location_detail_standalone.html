@@ -9,15 +9,48 @@
       <a class="btn btn-primary" href="{% url 'parmodels:bim_viewer_launch' location.id %}">
         {% if has_location_model %}Открыть техплан{% else %}Добавить техплан{% endif %}
       </a>
+      {% if has_location_model %}
+        <button class="btn btn-outline-danger" type="button" data-bs-toggle="modal" data-bs-target="#deleteLocationModelModal">
+          Удалить техплан
+        </button>
+      {% endif %}
     {% endif %}
     {% if can_update_location %}
       <a class="btn btn-outline-primary" href="{% url 'parmodels:location_edit_standalone' location.id %}">Редактировать</a>
     {% endif %}
     {% if can_delete_location %}
-      <a class="btn btn-outline-danger" href="{% url 'parmodels:location_delete_confirm' location.id %}">Удалить</a>
+      <a class="btn btn-outline-danger" href="{% url 'parmodels:location_delete_confirm' location.id %}">Удалить локацию</a>
     {% endif %}
   </div>
 </div>
+
+{% if has_location_model and can_create_location_model %}
+  <div class="modal fade" id="deleteLocationModelModal" tabindex="-1" aria-labelledby="deleteLocationModelModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form method="post" action="{% url 'parmodels:location_model_delete' location.id %}">
+          {% csrf_token %}
+          <div class="modal-header">
+            <h2 class="modal-title h5" id="deleteLocationModelModalLabel">Удалить техплан?</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-2">
+              Будет удален только техплан / JSON-модель{% if current_location_model %} «{{ current_location_model.name }}»{% endif %}.
+            </p>
+            <p class="text-secondary mb-0">
+              Локация, оборудование, заявки и связанные данные останутся без изменений.
+            </p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+            <button type="submit" class="btn btn-danger">Удалить техплан</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+{% endif %}
 
 <div class="card mb-3">
   <div class="card-body">

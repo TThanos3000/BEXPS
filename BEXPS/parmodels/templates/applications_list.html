@@ -7,9 +7,17 @@
     <h1 class="h3 mb-1">Заявки</h1>
     <div class="text-secondary">Поиск, статусы и контроль исполнения</div>
   </div>
-  {% if can_create_application %}
-    <a class="btn btn-primary" href="{% url 'parmodels:application_create' %}">Добавить</a>
-  {% endif %}
+  <div class="d-flex flex-wrap gap-2">
+    {% if can_view_application %}
+      <button class="btn btn-outline-success" type="button" data-bs-toggle="modal" data-bs-target="#applicationsExcelExportModal">
+        <i class="bi bi-file-earmark-excel" aria-hidden="true"></i>
+        Excel
+      </button>
+    {% endif %}
+    {% if can_create_application %}
+      <a class="btn btn-primary" href="{% url 'parmodels:application_create' %}">Добавить</a>
+    {% endif %}
+  </div>
 </div>
 
 <form method="get" class="row g-2 mb-3">
@@ -26,6 +34,59 @@
     Фильтры
   </button>
   <a class="btn btn-outline-secondary" href="{% url 'parmodels:applications_list' %}">Сбросить</a>
+</div>
+
+<div class="modal fade" id="applicationsExcelExportModal" tabindex="-1" aria-labelledby="applicationsExcelExportModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="applicationsExcelExportForm" method="get" action="{% url 'parmodels:applications_export' %}" novalidate>
+        <div class="modal-header">
+          <h2 class="modal-title h5" id="applicationsExcelExportModalLabel">Выгрузка заявок в Excel</h2>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="q" value="{{ q }}">
+          <input type="hidden" name="status" value="{{ filters.status }}">
+          <input type="hidden" name="priority" value="{{ filters.priority }}">
+          <input type="hidden" name="executor" value="{{ filters.executor }}">
+          <input type="hidden" name="mine" value="{{ filters.mine }}">
+          <input type="hidden" name="my_applications" value="{{ request.GET.my_applications }}">
+          <input type="hidden" name="date_create_from" value="{{ filters.date_create_from }}">
+          <input type="hidden" name="date_create_to" value="{{ filters.date_create_to }}">
+          <input type="hidden" name="deadline_from" value="{{ filters.deadline_from }}">
+          <input type="hidden" name="deadline_to" value="{{ filters.deadline_to }}">
+
+          <div class="mb-3">
+            <label class="form-label" for="exportDateType">Тип даты</label>
+            <select class="form-select" id="exportDateType" name="export_date_type">
+              <option value="created">Дата создания</option>
+              <option value="deadline">Дата дедлайна</option>
+            </select>
+          </div>
+          <div class="row g-3">
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="exportDateFrom">Дата от</label>
+              <input class="form-control" id="exportDateFrom" type="date" name="export_date_from">
+              <div class="invalid-feedback">Неверный диапазон дат</div>
+            </div>
+            <div class="col-12 col-md-6">
+              <label class="form-label" for="exportDateTo">Дата до</label>
+              <input class="form-control" id="exportDateTo" type="date" name="export_date_to">
+              <div class="invalid-feedback">Неверный диапазон дат</div>
+            </div>
+          </div>
+          <div class="form-text mt-3">Текущие поиск и фильтры страницы будут сохранены.</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Отмена</button>
+          <button class="btn btn-success" type="submit">
+            <i class="bi bi-file-earmark-excel" aria-hidden="true"></i>
+            Выгрузить
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
 <div class="modal fade" id="applicationsFiltersModal" tabindex="-1" aria-labelledby="applicationsFiltersModalLabel" aria-hidden="true">
@@ -311,6 +372,41 @@
           legend: { position: "bottom" },
         },
       },
+    });
+  }
+
+  const exportForm = document.getElementById("applicationsExcelExportForm");
+  if (exportForm) {
+    const exportDateFrom = document.getElementById("exportDateFrom");
+    const exportDateTo = document.getElementById("exportDateTo");
+
+    const setExportDateError = (hasError) => {
+      [exportDateFrom, exportDateTo].forEach((input) => {
+        if (!input) return;
+        input.classList.toggle("is-invalid", hasError);
+      });
+    };
+
+    const validateExportDates = () => {
+      const hasError = Boolean(
+        exportDateFrom.value
+        && exportDateTo.value
+        && exportDateFrom.value > exportDateTo.value
+      );
+      setExportDateError(hasError);
+      return !hasError;
+    };
+
+    exportForm.addEventListener("submit", (event) => {
+      if (!validateExportDates()) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+
+    [exportDateFrom, exportDateTo].forEach((input) => {
+      input.addEventListener("input", validateExportDates);
+      input.addEventListener("change", validateExportDates);
     });
   }
 </script>
