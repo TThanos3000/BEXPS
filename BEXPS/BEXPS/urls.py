@@ -25,20 +25,23 @@ from rest_framework import permissions
 
 schema_view = get_schema_view(
     openapi.Info(
-        title="API Documentation",
+        title="BEXPS REST API",
         default_version="v1",
-        description="Description of your API",
-        terms_of_service="https://www.google.com/policies/terms/",
-        contact=openapi.Contact(email="your_email@example.com"),
-        license=openapi.License(name="BSD License"),
+        description=(
+            "REST API для будущих интеграций BEXPS. "
+            "Авторизация выполняется через стандартные Django sessions/Basic auth; JWT не используется."
+        ),
     ),
     public=True,
-    permission_classes=(permissions.AllowAny,),
+    permission_classes=(permissions.IsAuthenticated,),
 )
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path("api/", include("parmodels.api_urls")),
+    path("api/schema/", schema_view.without_ui(cache_timeout=0), name="api-schema"),
+    path("api/docs/", schema_view.with_ui("swagger", cache_timeout=0), name="api-docs"),
     path(
         "swagger/",
         schema_view.with_ui("swagger", cache_timeout=0),
@@ -49,4 +52,3 @@ urlpatterns = [
 ]
 
 urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
-

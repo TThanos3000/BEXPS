@@ -78,6 +78,36 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'BEXPS.wsgi.application'
 
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+        "rest_framework.authentication.BasicAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+        "rest_framework.renderers.BrowsableAPIRenderer",
+    ],
+}
+
+SWAGGER_SETTINGS = {
+    "USE_SESSION_AUTH": True,
+    "LOGIN_URL": "/login/",
+    "LOGOUT_URL": "/logout/",
+    "SECURITY_DEFINITIONS": {
+        "Basic": {
+            "type": "basic",
+        },
+        "Session": {
+            "type": "apiKey",
+            "name": "sessionid",
+            "in": "cookie",
+        },
+    },
+}
+
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
